@@ -1,0 +1,35 @@
+Lyra Validate
+Copyright (c) 2026. All Rights Reserved.
+
+PROPRIETARY AND CONFIDENTIAL.
+
+This software and its source code, documentation, and associated materials
+(collectively, the "Software") are proprietary and confidential. No license,
+right, or interest in or to the Software is granted, whether by implication,
+estoppel, or otherwise, except under a separate written agreement executed by
+the copyright holder.
+
+You MAY NOT, without prior express written permission of the copyright holder:
+  (a) copy, reproduce, or distribute the Software, in whole or in part;
+  (b) modify, adapt, translate, or create derivative works of the Software;
+  (c) sublicense, sell, rent, lease, or otherwise commercially exploit the
+      Software; or
+  (d) reverse engineer, decompile, or disassemble the Software except to the
+      extent such restriction is prohibited by applicable law.
+
+The published statistical methods that the Software implements (the Deflated
+Sharpe Ratio, the Probabilistic Sharpe Ratio, the Probability of Backtest
+Overfitting via CSCV, and purged walk-forward cross-validation, all of Bailey,
+Borwein, Lopez de Prado and Zhu) are public mathematics and are not claimed as
+proprietary; this license covers only this particular implementation and the
+accompanying product.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+NOT INVESTMENT ADVICE. The Software is a statistical measurement tool. It does
+not generate trading signals, manage money, or guarantee any financial outcome.

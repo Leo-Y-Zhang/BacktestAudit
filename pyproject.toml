@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lyravalidate"
+version = "0.1.0"
+description = "Lyra Validate - an honest, published-statistics verdict on whether a backtest edge is real or overfit. A measurement tool, not a money-maker."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary - All Rights Reserved" }
+authors = [{ name = "Lyra Validate" }]
+keywords = [
+    "quant",
+    "backtest",
+    "overfitting",
+    "deflated-sharpe",
+    "pbo",
+    "cross-validation",
+    "validation",
+]
+classifiers = [
+    "License :: Other/Proprietary License",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+    "mypy>=1.8",
+]
+
+[project.scripts]
+lyra-validate = "lyravalidate.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+lyravalidate = ["py.typed"]
+
+# ── ruff ──────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+# N803/N806: published statistical formulae use canonical upper-case notation
+# (T periods, N configs, SR, M matrix) deliberately mirroring Bailey & Lopez de
+# Prado; lower-casing them would obscure the mathematics.
+ignore = ["N803", "N806"]
+
+# ── mypy ──────────────────────────────────────────────────────────────────────
+[tool.mypy]
+# Target 3.12: numpy's bundled stubs use PEP 695 `type` statements that abort
+# mypy under 3.10/3.11. The package's own code is type-clean at 3.12/3.13 and
+# remains runtime-compatible with the >=3.10 floor declared above.
+python_version = "3.12"
+strict = true
+files = ["src"]
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["scipy.*", "pandas.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# ── pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
