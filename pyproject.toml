@@ -9,7 +9,7 @@ description = "Lyra Validate - an honest, published-statistics verdict on whethe
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary - All Rights Reserved" }
-authors = [{ name = "Lyra Validate" }]
+authors = [{ name = "GreenPandaTech" }]
 keywords = [
     "quant",
     "backtest",
