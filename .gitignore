@@ -47,3 +47,9 @@ Thumbs.db
 
 # listing build artifact (the buyer download zip, regenerable)
 listing/*.zip
+
+# Secrets / credentials (defensive - none should ever exist here)
+.env
+.env.*
+*.pem
+*.key
