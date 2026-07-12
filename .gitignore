@@ -45,9 +45,6 @@ Thumbs.db
 /examples/sample_report.html
 /examples/sample_report.md
 
-# listing build artifact (the buyer download zip, regenerable)
-listing/*.zip
-
 # Secrets / credentials (defensive - none should ever exist here)
 .env
 .env.*
