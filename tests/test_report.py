@@ -126,6 +126,9 @@ def test_citations_mention_published_methods() -> None:
     assert "Bailey" in CITATIONS
     assert "Deflated Sharpe" in CITATIONS
     assert "CSCV" in CITATIONS
+
+
+def test_citations_mention_min_trl_and_min_btl() -> None:
     assert "MinTRL" in CITATIONS
     assert "MinBTL" in CITATIONS
 
