@@ -85,6 +85,7 @@ deflated_sharpe: float    # probability the edge survives deflation
 pbo: float                # probability of backtest overfitting (NaN if N/A)
 sharpe: float             # annualised Sharpe
 n_trials: int             # configurations assumed tried
+n_periods: int            # finite observations judged (NaN/inf rows are not evidence)
 min_track_record: float   # MinTRL: observations needed at the observed moments
 min_backtest_years: float # MinBTL: years needed to beat a best-of-n_trials noise search
 reasons: list[str]
@@ -107,6 +108,11 @@ the observed length against MinTRL instead. For a searched record
 (`n_trials > 1`), the **Minimum Backtest Length** (MinBTL) additionally reports
 how many years of backtest are needed before the observed annualised Sharpe
 even exceeds the expected best of that many pure-noise trials.
+
+Only finite observations count as evidence: every statistic drops NaN/inf
+entries (blank CSV cells load as NaN), and `n_periods` and the shortfall
+arithmetic exclude them too, so padding a record with blank rows cannot shrink
+the reported gap.
 
 ## CLI
 

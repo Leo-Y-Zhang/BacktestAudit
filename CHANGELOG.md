@@ -4,6 +4,30 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-07-30
+
+### Fixed
+- The evidence gap now counts only finite observations. `n_periods`, the
+  MinTRL shortfall arithmetic in the reasons, `summary()`, the report
+  "Observations" row and the CLI JSON previously used the raw input length,
+  so NaN/inf rows (e.g. blank CSV cells, which load as NaN) were credited as
+  track record: the reported shortfall was understated and `summary()` could
+  call a record "sufficient" whose deflated Sharpe failed the bar. The
+  deployable/classification result itself was unaffected by that path.
+- PSR, DSR, MinTRL and the Sharpe standard error now fail closed on
+  near-constant returns. Scipy's skew/kurtosis go NaN under catastrophic
+  cancellation and the NaN slipped past the non-positive-variance guard,
+  leaking NaN probabilities into `evaluate(...)` — which could wave a
+  constant series through the deflated-Sharpe gate (NaN fails no `<`
+  comparison). Such records are now degenerate, exactly as documented.
+- An infinite MinTRL is no longer always blamed on "Sharpe does not exceed
+  the benchmark": the failure reasons distinguish a confidence bar of 1, a
+  record too degenerate to measure, and a Sharpe below the deflation
+  benchmark, and `summary()` uses neutral fail-closed wording.
+- The `minimum_track_record_length` docstring scoped its equivalence claim:
+  `T >= MinTRL` iff `PSR >= confidence` is exact for `confidence > 0.5`
+  (every realistic bar), not for all confidence levels.
+
 ## [0.2.0] - 2026-07-30
 
 The evidence-gap release: when a track record is not statistically significant,
