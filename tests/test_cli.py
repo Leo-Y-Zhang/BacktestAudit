@@ -198,3 +198,36 @@ def test_cli_on_packaged_sample(tmp_path: Path, capsys: pytest.CaptureFixture[st
     assert code == 0
     assert "DEPLOYABLE" in out
     assert report.exists()
+
+
+def test_cli_matrix_json_reports_effective_trials(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without --trials the matrix is the whole search: the JSON surfaces the
+    matrix-measured effective trials and cross-trial Sharpe dispersion."""
+    rng = np.random.default_rng(11)
+    base = rng.standard_normal((500, 1))
+    correlated = 0.01 * (
+        0.9486832980505138 * np.repeat(base, 4, axis=1)
+        + 0.31622776601683794 * rng.standard_normal((500, 4))
+    )  # one family of four highly correlated configs (rho ~ 0.9)
+    independent = 0.01 * rng.standard_normal((500, 4))
+    csv = tmp_path / "search.csv"
+    _write_returns(
+        csv, np.hstack([correlated, independent]), [f"cfg{i}" for i in range(8)]
+    )
+
+    code = main([str(csv), "--json"])
+    out = capsys.readouterr().out
+    assert code in (0, 1)
+    payload = json.loads(out)
+    assert payload["n_trials"] == 8
+    assert payload["effective_trials"] == 5  # 1 family + 4 independents
+    assert payload["cross_trial_sharpe_std"] >= 0.0
+
+    code = main([str(csv), "--trials", "8", "--json"])
+    out = capsys.readouterr().out
+    assert code in (0, 1)
+    payload = json.loads(out)
+    assert payload["effective_trials"] is None  # explicit count: published path
+    assert payload["cross_trial_sharpe_std"] is None

@@ -57,7 +57,10 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="N",
         help="Number of configurations tried during research (selection-bias count). "
-        "Defaults to the number of columns for a matrix, else 1.",
+        "Defaults to the number of columns for a matrix, else 1. When omitted for a "
+        "matrix, the deflation benchmark is measured from the matrix itself (cross-trial "
+        "Sharpe dispersion across effective, correlation-clustered trials); supplying it "
+        "asserts the search size and keeps the published raw-count deflation.",
     )
     parser.add_argument(
         "--periods-per-year",
@@ -132,6 +135,8 @@ def _verdict_to_dict(verdict: Verdict) -> dict[str, Any]:
         "pbo": _finite_or_none(verdict.pbo),
         "probabilistic_sharpe": _finite_or_none(verdict.probabilistic_sharpe),
         "n_trials": verdict.n_trials,
+        "effective_trials": verdict.effective_trials,
+        "cross_trial_sharpe_std": _finite_or_none(verdict.cross_trial_sharpe_std),
         "n_periods": verdict.n_periods,
         "periods_per_year": verdict.periods_per_year,
         "min_track_record": _finite_or_none(verdict.min_track_record),

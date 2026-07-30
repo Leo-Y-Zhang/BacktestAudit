@@ -26,6 +26,8 @@ import numpy.typing as npt
 from .crossval import PurgedWalkForwardSplitter, default_walk_forward_splitter
 from .stats import (
     annualized_sharpe,
+    cluster_trials,
+    cross_trial_sharpe_std,
     deflated_sharpe_ratio,
     expected_max_sharpe_benchmark,
     information_coefficient,
@@ -82,6 +84,15 @@ class Verdict:
     # beat the expected best of n_trials noise trials; NaN = not computed).
     min_track_record: float = float("nan")
     min_backtest_years: float = float("nan")
+    # Matrix-faithful deflation (Lopez de Prado & Lewis, 2019): set only when a
+    # candidate matrix was judged without an explicit n_trials override, so the
+    # matrix itself was the whole search. `effective_trials` is the number of
+    # correlation clusters among the configurations; `cross_trial_sharpe_std`
+    # is the per-period Sharpe dispersion across the cluster aggregates that
+    # the deflation benchmark was built from (None when only one effective
+    # trial exists -- a single trial has no dispersion and needs none).
+    effective_trials: int | None = None
+    cross_trial_sharpe_std: float | None = None
     oos_sharpe: float | None = None
     oos_information_coefficient: float | None = None
 
@@ -96,6 +107,11 @@ class Verdict:
             f"  PBO             : {pbo}",
             f"  Trials assumed  : {self.n_trials}",
         ]
+        if self.effective_trials is not None:
+            lines.append(
+                f"  Effective trials: {self.effective_trials} "
+                "(correlation clusters among the configurations)"
+            )
         if not math.isnan(self.min_track_record):
             if math.isinf(self.min_track_record):
                 # inf can mean Sharpe <= benchmark, a degenerate record, or a
@@ -139,6 +155,14 @@ class _OOSResult:
     returns: npt.NDArray[np.float64]
     mean_ic: float
     n_folds: int
+
+
+@dataclass(frozen=True)
+class _MatrixDeflation:
+    """Matrix-measured inputs for the DSR benchmark (Lopez de Prado & Lewis, 2019)."""
+
+    effective_trials: int
+    cross_trial_std: float | None  # None when one effective trial (no dispersion exists)
 
 
 def _walk_forward_oos(
@@ -186,21 +210,31 @@ def _resolve_strategy(
     n_trials: int | None,
     pbo_splits: int,
     periods_per_year: int,
-) -> tuple[npt.NDArray[np.float64], float, int]:
-    """Reduce raw ``returns`` to ``(strategy_series, pbo, n_trials)``.
+) -> tuple[npt.NDArray[np.float64], float, int, _MatrixDeflation | None]:
+    """Reduce raw ``returns`` to ``(strategy_series, pbo, n_trials, matrix_deflation)``.
 
     A 2-D input is treated as a candidate matrix (``T`` periods x ``N`` configs):
     PBO is computed across the columns and the column with the highest full-sample
     annualised Sharpe is taken as the *selected* strategy, with ``n_trials``
     defaulting to ``N`` so the deflation reflects the search. A 1-D input is a
     single strategy with no PBO (``NaN``) and ``n_trials`` defaulting to ``1``.
+
+    When the matrix is judged without an explicit ``n_trials`` override, the
+    matrix *is* the whole search, and the DSR benchmark inputs are measured
+    from it directly (Lopez de Prado & Lewis, 2019): the effective number of
+    independent trials is the count of correlation clusters among the columns
+    and the per-trial dispersion is the cross-trial Sharpe standard deviation.
+    An explicit ``n_trials`` asserts a search larger than (or different from)
+    the matrix, so the published raw-count approximation is kept for it. When
+    the cross-section is unusable the published approximation is the fallback
+    (fail-closed: the assumed search is never weakened by a failed measurement).
     """
     arr: npt.NDArray[np.float64] = np.asarray(returns, dtype=np.float64)
     if arr.ndim == 1:
-        return arr, float("nan"), (n_trials if n_trials is not None else 1)
+        return arr, float("nan"), (n_trials if n_trials is not None else 1), None
     if arr.ndim == 2:
         if arr.shape[1] <= 1:
-            return arr.ravel(), float("nan"), (n_trials if n_trials is not None else 1)
+            return arr.ravel(), float("nan"), (n_trials if n_trials is not None else 1), None
         N = int(arr.shape[1])
         # Fail-closed PBO: an unrankable matrix is rejected, not waved through.
         # Lift max_blocks to honour a user who asks for more CSCV blocks than the
@@ -213,7 +247,18 @@ def _resolve_strategy(
         )
         sharpes = [annualized_sharpe(arr[:, j], periods_per_year) for j in range(N)]
         best = int(np.argmax(sharpes))
-        return arr[:, best], pbo, (n_trials if n_trials is not None else N)
+        matrix_deflation: _MatrixDeflation | None = None
+        if n_trials is None:
+            clusters = cluster_trials(arr)
+            if len(clusters) == 1:
+                matrix_deflation = _MatrixDeflation(effective_trials=1, cross_trial_std=None)
+            elif len(clusters) >= 2:
+                sigma_cross = cross_trial_sharpe_std(arr, clusters=clusters)
+                if math.isfinite(sigma_cross):
+                    matrix_deflation = _MatrixDeflation(
+                        effective_trials=len(clusters), cross_trial_std=sigma_cross
+                    )
+        return arr[:, best], pbo, (n_trials if n_trials is not None else N), matrix_deflation
     raise ValueError("returns must be 1-D (one strategy) or 2-D (T x N candidate matrix)")
 
 
@@ -235,14 +280,20 @@ def evaluate(
     returns:
         Realised per-period returns. Either 1-D (a single strategy) or 2-D
         (``T`` periods x ``N`` candidate configurations -- PBO is then computed
-        across columns and the best in-sample column is judged).
+        across columns and the best in-sample column is judged; without an
+        explicit ``n_trials`` the DSR benchmark is also *measured* from the
+        matrix -- cross-trial Sharpe dispersion across the effective,
+        correlation-clustered trials, per Lopez de Prado & Lewis, 2019 --
+        instead of approximated from the selected column alone).
     predictions, targets:
         Optional paired per-period signal scores and the forward returns they aim
         to predict. When supplied, an honest purged walk-forward OOS series is
         built and used as the basis for the Sharpe / deflated-Sharpe gates.
     n_trials:
         Number of configurations tried during research (selection-bias count).
-        Defaults to ``N`` for a candidate matrix, else ``1``.
+        Defaults to ``N`` for a candidate matrix, else ``1``. Supplying it for
+        a matrix asserts the search was *not* just the matrix, so the published
+        raw-count deflation is applied instead of the matrix-measured one.
     periods_per_year:
         Annualisation factor for the Sharpe ratio (252 trading days by default).
     thresholds:
@@ -262,7 +313,7 @@ def evaluate(
         raise ValueError("periods_per_year must be > 0")
     thr = thresholds or Thresholds()
 
-    strategy, pbo, n_trials_eff = _resolve_strategy(
+    strategy, pbo, n_trials_eff, matrix_deflation = _resolve_strategy(
         returns,
         n_trials=n_trials,
         pbo_splits=pbo_splits,
@@ -278,10 +329,31 @@ def evaluate(
             strategy = oos.returns  # the OOS series is the honest basis for gating
             oos_sharpe = annualized_sharpe(strategy, periods_per_year)
             oos_ic = oos.mean_ic
+            # The matrix-measured benchmark describes the in-sample search, in
+            # the in-sample series' per-period Sharpe units; it does not apply
+            # to a different (walk-forward OOS) series, so the published
+            # approximation is used for the OOS gating basis.
+            matrix_deflation = None
 
     sharpe = annualized_sharpe(strategy, periods_per_year)
-    dsr = deflated_sharpe_ratio(strategy, n_trials_eff)
     psr = probabilistic_sharpe_ratio(strategy, 0.0)
+
+    # The deflation benchmark SR*: measured from the trials matrix when it was
+    # the whole search (Lopez de Prado & Lewis, 2019 -- cross-trial Sharpe
+    # dispersion across the effective, i.e. cluster-counted, trials), else the
+    # published approximation from the judged series' own Sharpe standard
+    # error and the assumed trial count. The DSR and MinTRL below share this
+    # SR*, which is what keeps T >= MinTRL equivalent to the DSR gate.
+    sigma_sr = sharpe_standard_error(strategy)  # inf on a degenerate record
+    if matrix_deflation is None:
+        deflation_benchmark = expected_max_sharpe_benchmark(sigma_sr, n_trials_eff)
+    elif matrix_deflation.cross_trial_std is None:
+        deflation_benchmark = 0.0  # one effective trial: no selection inflation
+    else:
+        deflation_benchmark = expected_max_sharpe_benchmark(
+            matrix_deflation.cross_trial_std, matrix_deflation.effective_trials
+        )
+    dsr = deflated_sharpe_ratio(strategy, sr_benchmark=deflation_benchmark)
 
     # Evidence gap: MinTRL against the same SR* the deflation used, at the policy
     # confidence -- so T >= MinTRL if and only if the DSR gate clears -- plus the
@@ -292,19 +364,37 @@ def evaluate(
     # the shortfall arithmetic (and the MinTRL comparison) would be wrong.
     n_obs = int(np.count_nonzero(np.isfinite(np.asarray(strategy, dtype=np.float64))))
     conf = thr.min_deflated_sharpe
-    sigma_sr = sharpe_standard_error(strategy)  # inf on a degenerate record
-    deflation_benchmark = expected_max_sharpe_benchmark(sigma_sr, n_trials_eff)
     if conf >= 1.0:
         min_trl = float("inf")  # Phi^-1(1) is infinite: no finite record suffices
     elif conf <= 0.0:
         min_trl = 0.0  # a non-positive bar is met by any record
     else:
         min_trl = minimum_track_record_length(strategy, deflation_benchmark, confidence=conf)
+    # MinBTL stays the published bound for the *assumed* number of trials: the
+    # pseudo-mathematics formula is defined for the count of trials tried, and
+    # the effective-trials refinement above applies to the DSR benchmark only.
     min_btl = minimum_backtest_length(sharpe, n_trials_eff)
     observed_years = n_obs / periods_per_year
 
     reasons: list[str] = []
     fail = False
+
+    if matrix_deflation is not None:
+        if matrix_deflation.cross_trial_std is None:
+            reasons.append(
+                f"Matrix-faithful deflation: the {n_trials_eff} supplied configurations "
+                "are effectively one trial (all columns are near-duplicates), so no "
+                "selection deflation applies (Lopez de Prado & Lewis, 2019)."
+            )
+        else:
+            reasons.append(
+                "Matrix-faithful deflation: the DSR benchmark is measured from the "
+                f"trials matrix - cross-trial Sharpe dispersion "
+                f"{matrix_deflation.cross_trial_std:.4f} per period across "
+                f"{matrix_deflation.effective_trials} effective trials (correlation "
+                f"clusters among the {n_trials_eff} configurations) - per Lopez de "
+                "Prado & Lewis (2019)."
+            )
 
     if dsr < thr.min_deflated_sharpe:
         fail = True
@@ -389,6 +479,12 @@ def evaluate(
         periods_per_year=periods_per_year,
         min_track_record=min_trl,
         min_backtest_years=min_btl,
+        effective_trials=(
+            matrix_deflation.effective_trials if matrix_deflation is not None else None
+        ),
+        cross_trial_sharpe_std=(
+            matrix_deflation.cross_trial_std if matrix_deflation is not None else None
+        ),
         oos_sharpe=oos_sharpe,
         oos_information_coefficient=oos_ic,
     )

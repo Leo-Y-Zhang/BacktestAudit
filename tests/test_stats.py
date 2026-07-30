@@ -15,7 +15,11 @@ from scipy.stats import norm
 from lyravalidate.stats import (
     EULER_MASCHERONI,
     annualized_sharpe,
+    cluster_trials,
+    cross_trial_sharpe_std,
     deflated_sharpe_ratio,
+    deflated_sharpe_ratio_from_trials,
+    effective_trials,
     expected_max_sharpe_benchmark,
     hit_rate,
     information_coefficient,
@@ -406,3 +410,148 @@ def test_pbo_max_blocks_caps_cost() -> None:
     perf = rng.standard_normal((200, 4))
     pbo = probability_of_backtest_overfitting(perf, n_splits=1000, max_blocks=10)
     assert 0.0 <= pbo <= 1.0
+
+
+# ── effective trials via correlation clustering (Lopez de Prado & Lewis 2019) ─
+
+
+def _planted_trials(
+    rho: float, groups: int = 3, per_group: int = 4, T: int = 400, seed: int = 17
+) -> np.ndarray:
+    """``groups`` blocks of ``per_group`` trials sharing a common factor.
+
+    Within a block the pairwise correlation is ~``rho``; across blocks it is ~0,
+    so the true number of effectively independent trials is ``groups``.
+    """
+    rng = np.random.default_rng(seed)
+    w = math.sqrt(rho)
+    cols = []
+    for _ in range(groups):
+        base = rng.standard_normal(T)
+        for _ in range(per_group):
+            cols.append(0.01 * (w * base + math.sqrt(1.0 - rho) * rng.standard_normal(T)))
+    return np.column_stack(cols)
+
+
+def test_cluster_trials_recovers_planted_groups() -> None:
+    clusters = cluster_trials(_planted_trials(0.7))
+    assert sorted(sorted(c) for c in clusters) == [
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [8, 9, 10, 11],
+    ]
+
+
+def test_effective_trials_iid_noise_is_column_count() -> None:
+    # Independent trials show no correlation structure, so every configuration
+    # really is its own trial: no clustering may be invented for them.
+    rng = np.random.default_rng(2024)
+    perf = 0.01 * rng.standard_normal((600, 20))
+    assert effective_trials(perf) == 20
+
+
+def test_effective_trials_planted_groups() -> None:
+    assert effective_trials(_planted_trials(0.9)) == 3
+    assert effective_trials(_planted_trials(0.5, groups=4, per_group=5, T=600)) == 4
+
+
+def test_effective_trials_duplicate_columns_are_one_trial() -> None:
+    # N copies of one series were one trial, not N: the search never varied.
+    rng = np.random.default_rng(5)
+    col = 0.001 + 0.01 * rng.standard_normal(300)
+    perf = np.column_stack([col] * 6)
+    assert effective_trials(perf) == 1
+
+
+def test_effective_trials_degenerate_is_zero() -> None:
+    # 0 is the "not measurable" sentinel (unusable matrix), never a trial count.
+    assert effective_trials(np.ones((10, 3))) == 0  # zero-variance columns
+    assert effective_trials(np.zeros((3, 5))) == 0  # T < 4
+    assert effective_trials(np.ones(10)) == 0  # not 2-D
+    assert effective_trials(np.ones((10, 1))) == 0  # N < 2
+
+
+def test_cluster_trials_non_finite_rows_are_not_evidence() -> None:
+    # NaN/inf rows are dropped (complete-case) before correlations are taken;
+    # a few injected holes must not change the recovered partition.
+    perf = _planted_trials(0.9)
+    noisy = perf.copy()
+    noisy[5, 0] = np.nan
+    noisy[100, 7] = np.inf
+    noisy[200, 11] = -np.inf
+    assert cluster_trials(noisy) == cluster_trials(perf)
+
+
+def test_cross_trial_sharpe_std_hand_value() -> None:
+    # Two singleton clusters: std(ddof=1) of two Sharpes is |SR1 - SR2|/sqrt(2).
+    a = np.array([0.01, 0.02, 0.03, 0.04])
+    b = np.array([-0.01, 0.02, 0.05, 0.01])
+    perf = np.column_stack([a, b])
+    expected = abs(sharpe_ratio(a) - sharpe_ratio(b)) / math.sqrt(2.0)
+    assert cross_trial_sharpe_std(perf, clusters=[[0], [1]]) == pytest.approx(
+        expected, rel=1e-12
+    )
+
+
+def test_cross_trial_sharpe_std_aggregates_cluster_members() -> None:
+    # A cluster's members are summed into one series before its Sharpe is taken
+    # (Lopez de Prado & Lewis 2019 aggregate trials within a cluster), so a
+    # cluster of two copies of `a` has exactly the Sharpe of `a` (scale-invariant).
+    a = np.array([0.01, 0.02, 0.03, 0.04])
+    b = np.array([-0.01, 0.02, 0.05, 0.01])
+    perf = np.column_stack([a, a, b])
+    expected = abs(sharpe_ratio(a + a) - sharpe_ratio(b)) / math.sqrt(2.0)
+    assert cross_trial_sharpe_std(perf, clusters=[[0, 1], [2]]) == pytest.approx(
+        expected, rel=1e-12
+    )
+    assert sharpe_ratio(a + a) == pytest.approx(sharpe_ratio(a), rel=1e-12)
+
+
+def test_cross_trial_sharpe_std_unmeasurable_is_inf() -> None:
+    # Fail-closed: no measurable dispersion means infinite uncertainty, exactly
+    # like sharpe_standard_error -- 0.0 would erase the deflation benchmark.
+    assert math.isinf(cross_trial_sharpe_std(np.ones(10)))  # not 2-D
+    assert math.isinf(cross_trial_sharpe_std(np.ones((10, 4))))  # degenerate columns
+    perf = _planted_trials(0.9)
+    assert math.isinf(cross_trial_sharpe_std(perf, clusters=[[0, 1, 2]]))  # one cluster
+
+
+def test_dsr_from_trials_duplicates_collapse_to_psr() -> None:
+    # The raw-N deflation punishes a duplicated column as if it were 8 trials;
+    # the matrix-faithful DSR sees one effective trial and collapses to the PSR.
+    rng = np.random.default_rng(7)
+    col = 0.001 + 0.01 * rng.standard_normal(500)
+    perf = np.column_stack([col] * 8)
+    faithful = deflated_sharpe_ratio_from_trials(perf)
+    assert faithful == pytest.approx(probabilistic_sharpe_ratio(col, 0.0), rel=1e-12)
+    assert faithful > deflated_sharpe_ratio(col, 8)
+
+
+def test_dsr_from_trials_correlated_search_deflates_less_than_raw_n() -> None:
+    # 24 trials in 3 correlated families: deflating by the raw column count
+    # overstates the search, so the matrix-faithful DSR sits strictly between
+    # the raw-N published approximation and the undeflated PSR.
+    perf = _planted_trials(0.9, groups=3, per_group=8, T=500, seed=11)
+    best = int(np.argmax([sharpe_ratio(perf[:, j]) for j in range(perf.shape[1])]))
+    faithful = deflated_sharpe_ratio_from_trials(perf)
+    published_raw_n = deflated_sharpe_ratio(perf[:, best], perf.shape[1])
+    psr = probabilistic_sharpe_ratio(perf[:, best], 0.0)
+    assert published_raw_n < faithful < psr
+
+
+def test_dsr_from_trials_fail_closed() -> None:
+    assert deflated_sharpe_ratio_from_trials(np.ones((10, 4))) == 0.0
+    assert deflated_sharpe_ratio_from_trials(np.ones(10)) == 0.0
+
+
+def test_dsr_from_trials_explicit_selected_series() -> None:
+    # An explicit `selected` series is judged against the matrix's benchmark.
+    perf = _planted_trials(0.7, seed=23)
+    rng = np.random.default_rng(29)
+    other = 0.0005 + 0.01 * rng.standard_normal(400)
+    clusters = cluster_trials(perf)
+    sigma = cross_trial_sharpe_std(perf, clusters=clusters)
+    benchmark = expected_max_sharpe_benchmark(sigma, len(clusters))
+    assert deflated_sharpe_ratio_from_trials(perf, selected=other) == pytest.approx(
+        probabilistic_sharpe_ratio(other, benchmark), rel=1e-12
+    )

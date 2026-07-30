@@ -250,3 +250,170 @@ def test_matrix_verdict_reports_min_backtest_length() -> None:
     # noise search at this Sharpe, so the shortfall is called out.
     assert verdict.min_backtest_years > verdict.n_periods / verdict.periods_per_year
     assert any("MinBTL" in r for r in verdict.reasons)
+
+
+# ── matrix-faithful deflation (Lopez de Prado & Lewis 2019) ───────────────────
+
+
+def _planted_candidates(
+    rho: float, groups: int = 3, per_group: int = 4, T: int = 500, seed: int = 11
+) -> np.ndarray:
+    """``groups`` families of ``per_group`` correlated trials (see test_stats)."""
+    rng = np.random.default_rng(seed)
+    w = math.sqrt(rho)
+    cols = []
+    for _ in range(groups):
+        base = rng.standard_normal(T)
+        for _ in range(per_group):
+            cols.append(0.01 * (w * base + math.sqrt(1.0 - rho) * rng.standard_normal(T)))
+    return np.column_stack(cols)
+
+
+def test_matrix_default_reports_effective_trials() -> None:
+    """The default matrix path measures the search from the matrix itself."""
+    perf = _planted_candidates(0.9)
+    verdict = evaluate(perf)
+    assert verdict.n_trials == 12  # configurations tried stays the column count
+    assert verdict.effective_trials == 3  # ...but only 3 are effectively distinct
+    assert verdict.cross_trial_sharpe_std is not None
+    assert verdict.cross_trial_sharpe_std >= 0.0
+    assert any("effective trials" in r for r in verdict.reasons)
+    assert any("Lopez de Prado" in r for r in verdict.reasons)
+    assert "Effective trials" in verdict.summary()
+
+
+def test_matrix_explicit_n_trials_keeps_published_deflation() -> None:
+    """An explicit n_trials asserts the search size, so the matrix is no longer
+    the whole search and the published raw-count deflation applies unchanged."""
+    from lyravalidate.stats import annualized_sharpe, deflated_sharpe_ratio
+
+    perf = _planted_candidates(0.9)
+    verdict = evaluate(perf, n_trials=12)
+    assert verdict.effective_trials is None
+    assert verdict.cross_trial_sharpe_std is None
+    best = int(np.argmax([annualized_sharpe(perf[:, j]) for j in range(perf.shape[1])]))
+    assert verdict.deflated_sharpe == pytest.approx(
+        deflated_sharpe_ratio(perf[:, best], 12), rel=1e-12
+    )
+    assert not any("effective trials" in r for r in verdict.reasons)
+
+
+def test_matrix_iid_noise_keeps_the_overfit_conclusion() -> None:
+    """Independent noise trials have no correlation structure: every column is
+    its own effective trial, and the overfit-search conclusion is unchanged."""
+    rng = np.random.default_rng(2024)
+    candidates = 0.01 * rng.standard_normal((600, 60))
+    verdict = evaluate(candidates)
+    assert verdict.effective_trials == 60
+    assert verdict.classification == "PROBABLY_OVERFIT"
+    assert verdict.deflated_sharpe < 0.95
+
+
+def test_duplicated_configurations_are_not_extra_trials() -> None:
+    """Six copies of one strategy were ONE trial: the matrix-faithful DSR
+    collapses to the PSR instead of deflating for a search that never happened."""
+    from lyravalidate.stats import probabilistic_sharpe_ratio
+
+    rng = np.random.default_rng(7)
+    col = 0.001 + 0.01 * rng.standard_normal(500)
+    perf = np.column_stack([col] * 6)
+    verdict = evaluate(perf)
+    assert verdict.effective_trials == 1
+    assert verdict.cross_trial_sharpe_std is None  # one trial has no dispersion
+    assert verdict.deflated_sharpe == pytest.approx(
+        probabilistic_sharpe_ratio(col, 0.0), rel=1e-12
+    )
+
+
+def test_matrix_min_trl_agrees_with_the_dsr_gate() -> None:
+    """The MinTRL-vs-DSR equivalence must hold against the matrix-faithful
+    benchmark too (same SR*, inverted in the sample length)."""
+    for seed in (1, 9, 42, 123, 2024):
+        rng = np.random.default_rng(seed)
+        perf = 0.0004 + 0.009 * rng.standard_normal((900, 10))
+        verdict = evaluate(perf)
+        if np.isfinite(verdict.min_track_record):
+            assert (verdict.n_periods >= verdict.min_track_record) == (
+                verdict.deflated_sharpe >= 0.95
+            )
+        else:
+            assert verdict.deflated_sharpe < 0.95
+
+
+def test_matrix_falls_back_to_published_when_cross_section_unusable() -> None:
+    """A matrix without two usable columns cannot be measured cross-sectionally;
+    the verdict falls back to the published raw-count deflation (fail-closed)."""
+    from lyravalidate.stats import deflated_sharpe_ratio
+
+    rng = np.random.default_rng(4)
+    col = 0.0008 + 0.008 * rng.standard_normal(1000)
+    perf = np.column_stack([col, np.zeros(1000)])  # second column: zero variance
+    verdict = evaluate(perf)
+    assert verdict.effective_trials is None
+    assert verdict.deflated_sharpe == pytest.approx(
+        deflated_sharpe_ratio(col, 2), rel=1e-12
+    )
+
+
+def test_matrix_faithful_dsr_change_is_pinned_and_deliberate() -> None:
+    """REGRESSION PIN for the deliberate numeric change on the matrix path.
+
+    Before the matrix-faithful DSR (Lopez de Prado & Lewis 2019), the matrix
+    path deflated the best column by the raw column count with the column's
+    own Sharpe standard error as the per-trial dispersion. Now the benchmark
+    is measured from the matrix itself: cross-trial Sharpe dispersion across
+    the effective (correlation-clustered) trials. For a search of 12 pure-noise
+    configurations that are really 3 correlated families (rho ~ 0.9):
+
+    * old matrix-path number (still available via an explicit n_trials):
+      DSR 0.786238, MinTRL 2146 obs -- 12 correlated columns treated as 12
+      independent trials over-deflated the search;
+    * new default: DSR 0.961623, MinTRL 433 obs, effective trials 3.
+
+    The verdict itself stays not-deployable: the higher DSR is a noisy
+    estimate at only 3 effective trials, and the PBO gate (CSCV measures the
+    selection directly) still catches the overfit search -- the default-deny
+    stack is the protection, not any single gate. Pinned values were computed
+    by running this code (2026-07-31); they move only if the algorithm
+    changes, which is exactly what this pin is here to detect.
+    """
+    from lyravalidate.stats import annualized_sharpe, deflated_sharpe_ratio
+
+    perf = _planted_candidates(0.9)
+    best = int(np.argmax([annualized_sharpe(perf[:, j]) for j in range(perf.shape[1])]))
+    old = deflated_sharpe_ratio(perf[:, best], 12)
+    assert old == pytest.approx(0.786238, abs=1e-6)
+
+    verdict = evaluate(perf)
+    assert verdict.effective_trials == 3
+    assert verdict.deflated_sharpe == pytest.approx(0.961623, abs=1e-6)
+    assert verdict.deflated_sharpe != old
+    assert verdict.min_track_record == pytest.approx(432.008638, rel=1e-6)
+
+    old_verdict = evaluate(perf, n_trials=12)  # the published path, unchanged
+    assert old_verdict.deflated_sharpe == pytest.approx(old, rel=1e-12)
+    assert old_verdict.min_track_record == pytest.approx(2145.528044, rel=1e-6)
+
+    # The deliberate change does not weaken the overall verdict here.
+    assert verdict.classification == "PROBABLY_OVERFIT"
+    assert verdict.deployable is False
+    assert verdict.pbo > 0.5
+
+
+def test_matrix_faithful_dsr_iid_noise_pin_validates_the_null_approximation() -> None:
+    """REGRESSION PIN, independent-trials direction: for 60 iid noise columns
+    the effective count equals the column count and the measured cross-trial
+    dispersion is close to the null approximation the published path assumes,
+    so the DSR barely moves (0.415233 published raw-N vs 0.426080 measured;
+    computed by running this code, 2026-07-31). The conclusion is unchanged."""
+    from lyravalidate.stats import annualized_sharpe, deflated_sharpe_ratio
+
+    rng = np.random.default_rng(2024)
+    candidates = 0.01 * rng.standard_normal((600, 60))
+    best = int(np.argmax([annualized_sharpe(candidates[:, j]) for j in range(60)]))
+    old = deflated_sharpe_ratio(candidates[:, best], 60)
+    assert old == pytest.approx(0.415233, abs=1e-6)
+    verdict = evaluate(candidates)
+    assert verdict.deflated_sharpe == pytest.approx(0.426080, abs=1e-6)
+    assert abs(verdict.deflated_sharpe - old) < 0.02
+    assert verdict.classification == "PROBABLY_OVERFIT"

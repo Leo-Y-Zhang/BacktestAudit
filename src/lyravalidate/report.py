@@ -62,6 +62,8 @@ _REFERENCES: tuple[str, ...] = (
     "Overfitting (PBO via CSCV).",
     "Lopez de Prado (2018), Advances in Financial Machine Learning, ch. 7 "
     "(purged walk-forward CV).",
+    "Lopez de Prado & Lewis (2019), Detection of False Investment Strategies Using "
+    "Unsupervised Learning Methods (effective trials, matrix-faithful DSR).",
 )
 
 # Plain-English headline beneath the big verdict word.
@@ -192,6 +194,17 @@ def _diagnostics(verdict: Verdict) -> list[tuple[str, str]]:
     """Supplementary, non-gating figures shown in a small details block."""
     rows: list[tuple[str, str]] = [
         ("Configurations assumed tried (n_trials)", str(verdict.n_trials)),
+    ]
+    if verdict.effective_trials is not None:
+        rows.append(("Effective trials (correlation clusters)", str(verdict.effective_trials)))
+        if verdict.cross_trial_sharpe_std is not None:
+            rows.append(
+                (
+                    "Cross-trial Sharpe dispersion (per period)",
+                    f"{verdict.cross_trial_sharpe_std:.4f}",
+                )
+            )
+    rows += [
         ("Observations", str(verdict.n_periods)),
         ("Periods per year", str(verdict.periods_per_year)),
     ]

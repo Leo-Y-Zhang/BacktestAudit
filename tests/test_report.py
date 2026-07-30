@@ -145,3 +145,12 @@ def test_reports_surface_the_evidence_gap() -> None:
     assert overfit.n_trials > 1
     assert "MinBTL" in render_markdown(overfit, generated_at=_FIXED)
     assert "MinBTL" in render_html(overfit, generated_at=_FIXED)
+
+
+def test_reports_show_effective_trials_for_matrix_faithful_verdict() -> None:
+    # The default matrix path measures the search from the matrix itself, and
+    # both renderings surface the effective-trials diagnostic row.
+    overfit = _overfit_verdict()
+    assert overfit.effective_trials is not None
+    assert "Effective trials" in render_markdown(overfit, generated_at=_FIXED)
+    assert "Effective trials" in render_html(overfit, generated_at=_FIXED)

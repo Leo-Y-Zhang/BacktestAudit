@@ -17,6 +17,11 @@ public, peer-reviewed mathematics and are cited inline:
 * Minimum Backtest Length (MinBTL) -- Bailey, Borwein, Lopez de Prado & Zhu
   (2014), "Pseudo-Mathematics and Financial Charlatanism: The Effects of
   Backtest Overfitting on Out-of-Sample Performance", *Notices of the AMS* 61(5).
+* Effective trials and cross-trial Sharpe dispersion for the matrix-faithful
+  DSR -- Lopez de Prado & Lewis (2019), "Detection of False Investment
+  Strategies Using Unsupervised Learning Methods", *Quantitative Finance* 19(9);
+  silhouette scores per Rousseeuw (1987), with the Kaufman & Rousseeuw (1990)
+  mean-silhouette bound as the no-structure guard.
 
 Numerical conventions are chosen to match those papers exactly: per-period
 (non-annualised) Sharpe inside PSR/DSR, *non-excess* kurtosis (normal == 3),
@@ -34,12 +39,18 @@ from itertools import combinations
 
 import numpy as np
 import numpy.typing as npt
+from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.spatial.distance import squareform
 from scipy.stats import kurtosis, norm, rankdata, skew
 
 __all__ = [
     "EULER_MASCHERONI",
     "annualized_sharpe",
+    "cluster_trials",
+    "cross_trial_sharpe_std",
     "deflated_sharpe_ratio",
+    "deflated_sharpe_ratio_from_trials",
+    "effective_trials",
     "expected_max_sharpe_benchmark",
     "hit_rate",
     "information_coefficient",
@@ -425,6 +436,318 @@ def minimum_backtest_length(sharpe: float, n_trials: int) -> float:
     # (1-gamma)*Z^-1(1-1/N) + gamma*Z^-1(1-1/(N e)) == the benchmark at sigma=1.
     factor = expected_max_sharpe_benchmark(1.0, n)
     return float((factor / float(sharpe)) ** 2)
+
+
+# ── Effective trials / matrix-faithful DSR (Lopez de Prado & Lewis, 2019) ─────
+
+# Kaufman & Rousseeuw (1990), "Finding Groups in Data": a mean silhouette at or
+# below 0.25 means no substantial clustering structure has been found. Applied
+# *per cluster*: a multi-member cluster whose own mean silhouette does not
+# clear this bound has not demonstrated cohesion and is split back into
+# singleton trials -- the conservative direction, since fewer clusters would
+# weaken the deflation. Measured margins for this guard (calibration run,
+# 2026-07-30, 10 seeds per shape, final algorithm): on iid-noise matrices
+# (T in 100..750, N in 5..60) no multi-member cluster of the winning partition
+# ever exceeded a cohesion of 0.188, while planted correlated families never
+# fell below 0.384 at pairwise rho 0.7 (0.639 at rho 0.9), and the effective
+# count was recovered 10/10 for every noise, family (rho >= 0.7) and mixed
+# family-plus-independents shape probed.
+_NO_STRUCTURE_SILHOUETTE = 0.25
+
+# Correlation distances at or below this are duplicates for clustering purposes
+# (sample correlation of exact copies is 1 up to float rounding).
+_DUPLICATE_TRIAL_DISTANCE = 1e-6
+
+
+def _prepared_trials(trials: npt.ArrayLike) -> tuple[FloatArray, list[int]] | None:
+    """Reduce a trials matrix to complete-case rows over its usable columns.
+
+    Returns ``(matrix, usable)`` where ``matrix`` holds only rows that are
+    finite across every usable column (non-finite rows are not evidence, per
+    the library-wide contract) and ``usable`` maps its columns back to the
+    original column indices. A column is usable when its own finite
+    observations yield valid Sharpe moments and it is not constant on the
+    complete-case rows. ``None`` when fewer than two usable columns or fewer
+    than four complete rows remain.
+    """
+    M: FloatArray = np.asarray(trials, dtype=np.float64)
+    if M.ndim != 2 or M.shape[1] < 2:
+        return None
+    usable = [j for j in range(M.shape[1]) if _sharpe_moments(M[:, j]) is not None]
+    if len(usable) < 2:
+        return None
+    sub: FloatArray = M[:, usable]
+    sub = sub[np.all(np.isfinite(sub), axis=1)]
+    if sub.shape[0] < _MIN_OBS:
+        return None
+    keep = np.std(sub, axis=0, ddof=1) > 0.0
+    if int(np.count_nonzero(keep)) < 2:
+        return None
+    if not bool(np.all(keep)):
+        usable = [j for j, kept in zip(usable, keep, strict=True) if kept]
+        sub = sub[:, keep]
+    return np.ascontiguousarray(sub), usable
+
+
+def _silhouette_scores(D: FloatArray, labels: npt.NDArray[np.int_]) -> FloatArray:
+    """Silhouette scores (Rousseeuw, 1987) from a precomputed distance matrix.
+
+    Singleton clusters score 0 by convention, as does a point whose within- and
+    between-cluster mean distances are both 0.
+    """
+    n = int(labels.size)
+    scores: FloatArray = np.zeros(n, dtype=np.float64)
+    unique = np.unique(labels)
+    for i in range(n):
+        same = labels == labels[i]
+        n_same = int(np.count_nonzero(same))
+        if n_same <= 1:
+            continue
+        a = float(np.sum(D[i, same]) / (n_same - 1))  # D[i, i] == 0
+        b = min(float(np.mean(D[i, labels == other])) for other in unique if other != labels[i])
+        denom = max(a, b)
+        if denom > 0.0:
+            scores[i] = (b - a) / denom
+    return scores
+
+
+def _best_partition(D: FloatArray) -> npt.NDArray[np.int_] | None:
+    """ONC-style cluster search over a correlation-distance matrix.
+
+    A deterministic variant of the Optimal Number of Clusters scheme of Lopez
+    de Prado & Lewis (2019): candidate partitions for ``k = 2 .. N-1`` come
+    from average-linkage hierarchical clustering on ``d = sqrt((1 - rho) / 2)``
+    (the paper's distance metric; its randomised k-means is replaced so runs
+    are reproducible) and the partition with the highest mean silhouette wins
+    (the standard silhouette-based model selection of Rousseeuw, 1987). The
+    paper's t-statistic score ``E[s] / sqrt(V[s])`` is deliberately not used
+    for selection: it rewards low silhouette *variance*, which on searches
+    mixing one correlated family with independent trials prefers merging the
+    family and stragglers into one diffuse cluster -- undercounting the
+    effective trials, the fail-open direction (measured during calibration).
+    Whether each cluster of the winning partition *survives* as a trial family
+    is decided per cluster by the Kaufman & Rousseeuw cohesion bound in
+    :func:`cluster_trials` -- the deterministic counterpart of the paper's
+    recursive redo of low-quality clusters. ``None`` only for ``N < 3``, where
+    no candidate ``k`` exists.
+    """
+    N = int(D.shape[0])
+    if N < 3:
+        return None
+    condensed: FloatArray = squareform(D, checks=False)
+    Z = linkage(condensed, method="average")
+    best_labels: npt.NDArray[np.int_] | None = None
+    best_mean = -math.inf
+    for k in range(2, N):
+        labels: npt.NDArray[np.int_] = fcluster(Z, t=k, criterion="maxclust")
+        mean_s = float(np.mean(_silhouette_scores(D, labels)))
+        if mean_s > best_mean:
+            best_mean = mean_s
+            best_labels = labels
+    return best_labels
+
+
+def cluster_trials(trials: npt.ArrayLike) -> list[list[int]]:
+    """Group trial columns into correlation clusters (Lopez de Prado & Lewis, 2019).
+
+    ``trials`` is a ``(T x N)`` matrix: ``T`` time periods (rows) by ``N``
+    strategy configurations tried during research (columns). Correlated trials
+    are not independent evidence of a search: this function recovers the
+    families, so that :func:`effective_trials` can count them and
+    :func:`cross_trial_sharpe_std` can measure the Sharpe dispersion across
+    them. Correlations are taken over complete-case rows (non-finite rows are
+    dropped; they are not evidence) among the usable columns.
+
+    Three outcomes, in decreasing order of measured structure:
+
+    * genuine correlation families -> one cluster per family. Every
+      multi-member cluster must itself clear the Kaufman & Rousseeuw
+      cohesion bound (see below), so a diffuse "everything else" cluster of
+      mutually uncorrelated columns is split back into singletons rather
+      than counted as one trial;
+    * all columns effectively identical (every pairwise correlation ~1) ->
+      a single cluster: the "search" only ever tried one distinct thing;
+    * no accepted structure (mean silhouette at or below the Kaufman &
+      Rousseeuw 0.25 bound) -> every usable column is its own singleton
+      cluster: the trials are effectively independent. This is the
+      conservative direction -- fewer clusters would weaken the deflation.
+
+    Weakly correlated families sit near the bound by construction (Kaufman &
+    Rousseeuw call 0.26-0.50 "weak" structure), so families around pairwise
+    correlation 0.5 may be counted as separate trials -- again the
+    conservative direction, never the optimistic one.
+
+    Returns
+    -------
+    list[list[int]]
+        Clusters as sorted lists of *original* column indices, ordered by
+        first member. Empty list when the matrix is unusable (not 2-D, fewer
+        than two usable columns, or fewer than four complete rows).
+    """
+    prepared = _prepared_trials(trials)
+    if prepared is None:
+        return []
+    sub, usable = prepared
+    corr: FloatArray = np.asarray(np.corrcoef(sub, rowvar=False), dtype=np.float64)
+    if not bool(np.all(np.isfinite(corr))):
+        return []
+    D: FloatArray = np.sqrt(np.clip(0.5 * (1.0 - np.clip(corr, -1.0, 1.0)), 0.0, 1.0))
+    np.fill_diagonal(D, 0.0)
+    if float(np.max(D)) <= _DUPLICATE_TRIAL_DISTANCE:
+        return [list(usable)]
+    labels = _best_partition(D)
+    if labels is None:
+        return [[j] for j in usable]
+    # Per-cluster cohesion check -- the deterministic counterpart of the ONC
+    # recursive redo of low-quality clusters: a multi-member cluster only
+    # counts as one trial family when its own mean silhouette clears the same
+    # Kaufman & Rousseeuw bound. Without this, mutually *uncorrelated* columns
+    # that merely have no better home get lumped into one diffuse cluster,
+    # undercounting the effective trials and weakening the deflation (the
+    # fail-open direction). Splitting an uncohesive cluster into singletons
+    # raises the trial count instead -- conservative.
+    scores = _silhouette_scores(D, labels)
+    grouped: dict[int, list[int]] = {}
+    for position, label in enumerate(labels):
+        grouped.setdefault(int(label), []).append(position)
+    clusters: list[list[int]] = []
+    for positions in grouped.values():
+        cohesive = (
+            len(positions) < 2
+            or float(np.mean(scores[positions])) > _NO_STRUCTURE_SILHOUETTE
+        )
+        if cohesive:
+            clusters.append([usable[p] for p in positions])
+        else:
+            clusters.extend([usable[p]] for p in positions)
+    return sorted(clusters)
+
+
+def effective_trials(trials: npt.ArrayLike) -> int:
+    """Effective number of independent trials in a search (Lopez de Prado & Lewis, 2019).
+
+    The number of correlation clusters among the trial columns -- the ``E[K]``
+    that belongs in the Deflated Sharpe Ratio's expected-maximum benchmark.
+    Deflating by the raw column count treats every configuration as an
+    independent draw, which overstates a search whose trials are correlated
+    (near-duplicate parameterisations); counting clusters restores the
+    assumption the benchmark formula actually makes.
+
+    Returns
+    -------
+    int
+        Number of clusters, in ``[1, N]``; ``0`` (a "not measurable" sentinel,
+        never a trial count) when the matrix is unusable -- callers must then
+        fall back to a trial count they can defend, e.g. the raw column count.
+    """
+    return len(cluster_trials(trials))
+
+
+def cross_trial_sharpe_std(
+    trials: npt.ArrayLike, clusters: list[list[int]] | None = None
+) -> float:
+    """Cross-trial dispersion of Sharpe estimates (Lopez de Prado & Lewis, 2019).
+
+    The DSR's expected-maximum benchmark formally requires the standard
+    deviation of the Sharpe estimates *across the trials of the search*. When
+    the trials matrix is available, that dispersion is measurable directly:
+    members of each correlation cluster are summed into one aggregate series
+    per cluster (Sharpe is scale-invariant, so equal-weight summing is the
+    same as averaging), and the standard deviation (``ddof=1``) of the
+    per-period cluster Sharpes is returned.
+
+    Parameters
+    ----------
+    trials:
+        ``(T x N)`` matrix of per-period returns, one column per configuration
+        tried. Rows that are non-finite for a cluster's members drop out of
+        that cluster's aggregate (they are not evidence).
+    clusters:
+        Cluster assignment as lists of column indices (e.g. from
+        :func:`cluster_trials`). Computed from ``trials`` when omitted. A
+        degenerate aggregate (e.g. members that cancel) contributes a Sharpe
+        of ``0.0``, per :func:`sharpe_ratio`.
+
+    Returns
+    -------
+    float
+        Standard deviation of the per-period cluster Sharpes; ``inf``
+        (fail-closed: no information) when fewer than two clusters exist --
+        returning ``0.0`` would erase the deflation benchmark entirely.
+
+    Honesty note
+    ------------
+    With few clusters this is a dispersion estimated from few points and is
+    correspondingly noisy (a ``ddof=1`` standard deviation of ``K`` values).
+    That is inherent to the published method, not a defect of the
+    implementation; it is why :func:`lyravalidate.evaluate.evaluate` keeps the
+    deflated Sharpe as one gate among three (Sharpe, PBO) rather than the sole
+    arbiter.
+    """
+    M: FloatArray = np.asarray(trials, dtype=np.float64)
+    if M.ndim != 2 or M.shape[1] < 1:
+        return float("inf")
+    if clusters is None:
+        clusters = cluster_trials(M)
+    if len(clusters) < 2:
+        return float("inf")
+    sharpes = [sharpe_ratio(np.sum(M[:, list(members)], axis=1)) for members in clusters]
+    return float(np.std(np.asarray(sharpes, dtype=np.float64), ddof=1))
+
+
+def deflated_sharpe_ratio_from_trials(
+    trials: npt.ArrayLike, selected: npt.ArrayLike | None = None
+) -> float:
+    """Matrix-faithful Deflated Sharpe Ratio (Lopez de Prado & Lewis, 2019).
+
+    The DSR of :func:`deflated_sharpe_ratio` approximates the null benchmark
+    ``SR*`` from a single series' own Sharpe standard error and a caller-
+    supplied trial count. When the actual trials matrix is available, both
+    inputs are measurable instead of assumed: ``SR*`` is built from the
+    *cross-trial* Sharpe dispersion (:func:`cross_trial_sharpe_std`) and the
+    *effective* number of independent trials (:func:`effective_trials`), and
+    the selected strategy's PSR is taken against that benchmark::
+
+        SR* = sqrt(V{SR_k}) * [ (1 - gamma) Z^-1(1 - 1/K) + gamma Z^-1(1 - 1/(K e)) ]
+
+    with ``K`` the number of correlation clusters and ``V{SR_k}`` the variance
+    of the cluster-aggregate Sharpes. With one effective trial (all columns
+    effectively identical) no selection took place and ``SR* = 0``: the DSR
+    collapses to the PSR, exactly as ``n_trials=1`` does in the published
+    approximation.
+
+    Parameters
+    ----------
+    trials:
+        ``(T x N)`` matrix of per-period returns for the configurations tried.
+    selected:
+        The series to judge. Defaults to the column of ``trials`` with the
+        highest full-sample Sharpe (the same selection rule
+        :func:`lyravalidate.evaluate.evaluate` applies to a candidate matrix).
+
+    Returns
+    -------
+    float
+        Probability in ``[0, 1]``; ``0.0`` (fail-closed) when the matrix is
+        unusable or the cross-trial dispersion cannot be measured. Because the
+        matrix-derived ``SR*`` is never negative, this can never exceed the
+        undeflated PSR of the selected series.
+    """
+    M: FloatArray = np.asarray(trials, dtype=np.float64)
+    clusters = cluster_trials(M)
+    if not clusters:
+        return 0.0
+    if selected is None:
+        best = int(np.argmax([sharpe_ratio(M[:, j]) for j in range(M.shape[1])]))
+        selected = M[:, best]
+    if len(clusters) == 1:
+        benchmark = 0.0
+    else:
+        sigma = cross_trial_sharpe_std(M, clusters=clusters)
+        if not math.isfinite(sigma):
+            return 0.0
+        benchmark = expected_max_sharpe_benchmark(sigma, len(clusters))
+    return probabilistic_sharpe_ratio(selected, benchmark)
 
 
 # ── Probability of Backtest Overfitting (CSCV) ────────────────────────────────

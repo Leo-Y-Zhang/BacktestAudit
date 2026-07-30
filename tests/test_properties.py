@@ -20,6 +20,8 @@ example counts, so the suite stays fast and reproducible run-to-run.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -27,9 +29,14 @@ from hypothesis.extra import numpy as hnp
 
 from lyravalidate.crossval import PurgedWalkForwardSplitter
 from lyravalidate.stats import (
+    cluster_trials,
+    cross_trial_sharpe_std,
     deflated_sharpe_ratio,
+    deflated_sharpe_ratio_from_trials,
+    effective_trials,
     probabilistic_sharpe_ratio,
     probability_of_backtest_overfitting,
+    sharpe_ratio,
 )
 
 settings.register_profile(
@@ -170,3 +177,60 @@ def test_walk_forward_never_leaks_into_eval_window(
         assert int(train_idx.max()) < eval_start
         assert int(valid_idx.max()) < int(test_idx.min())
         assert int(test_idx.max()) < n
+
+
+# ── effective trials / matrix-faithful deflation ──────────────────────────────
+
+
+@given(perf=_candidate_matrix)
+def test_effective_trials_bounded_by_column_count(perf: np.ndarray) -> None:
+    K = effective_trials(perf)
+    assert 0 <= K <= perf.shape[1]
+
+
+@given(perf=_candidate_matrix)
+def test_cluster_trials_is_a_partition_of_columns(perf: np.ndarray) -> None:
+    clusters = cluster_trials(perf)
+    members = [j for cluster in clusters for j in cluster]
+    assert len(members) == len(set(members))  # disjoint
+    assert all(0 <= j < perf.shape[1] for j in members)
+    assert all(cluster for cluster in clusters)  # never an empty cluster
+
+
+@given(perf=_candidate_matrix)
+def test_cross_trial_sharpe_std_is_non_negative(perf: np.ndarray) -> None:
+    sigma = cross_trial_sharpe_std(perf)
+    assert sigma >= 0.0  # inf (unmeasurable, fail-closed) satisfies this too
+
+
+@given(perf=_candidate_matrix)
+def test_matrix_faithful_dsr_is_a_probability_capped_by_psr(perf: np.ndarray) -> None:
+    # The matrix-derived benchmark SR* is always >= 0, so the matrix-faithful
+    # deflation can never *raise* the probability above the undeflated PSR.
+    dsr = deflated_sharpe_ratio_from_trials(perf)
+    assert 0.0 <= dsr <= 1.0
+    best = int(np.argmax([sharpe_ratio(perf[:, j]) for j in range(perf.shape[1])]))
+    psr = probabilistic_sharpe_ratio(perf[:, best], 0.0)
+    assert dsr <= psr + 1e-12
+
+
+@given(
+    matrix_seed=st.integers(min_value=0, max_value=2**32 - 1),
+    perm_seed=st.integers(min_value=0, max_value=2**32 - 1),
+    T=st.integers(min_value=8, max_value=48),
+    N=st.integers(min_value=2, max_value=6),
+)
+def test_effective_trials_invariant_under_column_permutation(
+    matrix_seed: int, perm_seed: int, T: int, N: int
+) -> None:
+    """The trial count and the matrix-faithful DSR must not care which order
+    the configurations were tried in (same rationale as the PBO invariant;
+    continuous seeded data keeps the clustering tie-free)."""
+    perf = np.random.default_rng(matrix_seed).standard_normal((T, N))
+    perm = np.random.default_rng(perm_seed).permutation(N)
+    shuffled = perf[:, perm]
+    assert effective_trials(shuffled) == effective_trials(perf)
+    base = deflated_sharpe_ratio_from_trials(perf)
+    assert math.isclose(
+        deflated_sharpe_ratio_from_trials(shuffled), base, rel_tol=1e-9, abs_tol=1e-12
+    )
