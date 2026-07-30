@@ -12,13 +12,19 @@ public, peer-reviewed mathematics and are cited inline:
 * Probability of Backtest Overfitting (PBO) via Combinatorially-Symmetric
   Cross-Validation (CSCV) -- Bailey, Borwein, Lopez de Prado & Zhu (2017),
   "The Probability of Backtest Overfitting", *Journal of Computational Finance*.
+* Minimum Track Record Length (MinTRL) -- Bailey & Lopez de Prado (2012),
+  "The Sharpe Ratio Efficient Frontier", *Journal of Risk*.
+* Minimum Backtest Length (MinBTL) -- Bailey, Borwein, Lopez de Prado & Zhu
+  (2014), "Pseudo-Mathematics and Financial Charlatanism: The Effects of
+  Backtest Overfitting on Out-of-Sample Performance", *Notices of the AMS* 61(5).
 
 Numerical conventions are chosen to match those papers exactly: per-period
 (non-annualised) Sharpe inside PSR/DSR, *non-excess* kurtosis (normal == 3),
 biased Fisher-Pearson skew, the Euler-Mascheroni constant in the expected-maximum
 Sharpe benchmark, natural-log logits and ``rank / (N + 1)`` in CSCV. Degenerate
-inputs fail closed (return ``0.0``) so that "not enough evidence" can never be
-mistaken for "significant".
+inputs fail closed: probabilities return ``0.0`` and required-evidence /
+uncertainty statistics (MinTRL, MinBTL, the Sharpe standard error) return
+``inf``, so that "not enough evidence" can never be mistaken for "significant".
 """
 
 from __future__ import annotations
@@ -38,10 +44,13 @@ __all__ = [
     "hit_rate",
     "information_coefficient",
     "max_drawdown",
+    "minimum_backtest_length",
+    "minimum_track_record_length",
     "probabilistic_sharpe_ratio",
     "probability_of_backtest_overfitting",
     "rank_information_coefficient",
     "sharpe_ratio",
+    "sharpe_standard_error",
 ]
 
 FloatArray = npt.NDArray[np.float64]
@@ -173,6 +182,31 @@ def rank_information_coefficient(predictions: npt.ArrayLike, targets: npt.ArrayL
 # ── Probabilistic & Deflated Sharpe Ratios ────────────────────────────────────
 
 
+def sharpe_standard_error(returns: npt.ArrayLike) -> float:
+    """Standard error of the Sharpe estimator (Bailey & Lopez de Prado, 2012).
+
+    The ``hat sigma(SR)`` of "The Sharpe Ratio Efficient Frontier" under
+    non-normal returns::
+
+        sigma_SR = sqrt[ (1 - g3*SR + (g4 - 1)/4 * SR^2) / (T - 1) ]
+
+    with ``g3`` the (biased) skew and ``g4`` the *non-excess* kurtosis. This is
+    the denominator inside the PSR and the per-trial dispersion used by the DSR
+    benchmark (see :func:`expected_max_sharpe_benchmark`).
+
+    Returns
+    -------
+    float
+        The standard error of the per-period Sharpe estimate; ``inf``
+        (fail-closed: no information) on degenerate input -- returning ``0.0``
+        here would claim perfect certainty and make any Sharpe look significant.
+    """
+    moments = _sharpe_moments(returns)
+    if moments is None:
+        return float("inf")
+    return moments[2]
+
+
 def probabilistic_sharpe_ratio(returns: npt.ArrayLike, sr_benchmark: float = 0.0) -> float:
     """Probabilistic Sharpe Ratio (Bailey & Lopez de Prado, 2012).
 
@@ -284,6 +318,105 @@ def deflated_sharpe_ratio(
     )
     # Single source of truth for the final probability: route through PSR.
     return probabilistic_sharpe_ratio(returns, benchmark)
+
+
+# ── Minimum Track Record / Backtest Length ────────────────────────────────────
+
+
+def minimum_track_record_length(
+    returns: npt.ArrayLike,
+    sr_benchmark: float = 0.0,
+    confidence: float = 0.95,
+) -> float:
+    """Minimum Track Record Length (Bailey & Lopez de Prado, 2012).
+
+    The closed-form MinTRL of "The Sharpe Ratio Efficient Frontier": the number
+    of observations at which the PSR of the observed Sharpe against
+    ``sr_benchmark`` reaches ``confidence``, holding the observed per-period
+    Sharpe, skew and kurtosis fixed::
+
+        MinTRL = 1 + (1 - g3*SR + (g4 - 1)/4 * SR^2) * (Z_a / (SR - SR*))^2
+
+    where ``Z_a = Phi^-1(confidence)``, ``g3`` is the (biased) skew and ``g4``
+    the *non-excess* kurtosis -- the same variance formula the PSR uses, of
+    which MinTRL is the exact algebraic inverse in the sample length:
+    ``T >= MinTRL`` if and only if ``PSR(sr_benchmark) >= confidence``.
+
+    Parameters
+    ----------
+    returns:
+        Per-period (NOT annualised) returns. Non-finite entries are dropped.
+    sr_benchmark:
+        Per-period Sharpe to test against (``SR*``). Defaults to ``0.0``.
+    confidence:
+        Required PSR level, strictly inside ``(0, 1)``; ``0.95`` mirrors the
+        conventional 5% significance level.
+
+    Returns
+    -------
+    float
+        Required number of observations (may be fractional; take the ceiling
+        for a whole-observation requirement). ``inf`` (fail-closed) when the
+        observed Sharpe does not exceed ``sr_benchmark`` -- no track record
+        length would ever reach the bar at these moments -- or on degenerate
+        input.
+    """
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be strictly between 0 and 1")
+    moments = _sharpe_moments(returns)
+    if moments is None:
+        return float("inf")
+    T, SR, sigma = moments
+    excess = SR - float(sr_benchmark)
+    if excess <= 0.0:
+        return float("inf")
+    variance_numerator = sigma * sigma * (T - 1)  # 1 - g3*SR + (g4 - 1)/4 * SR^2
+    z = float(norm.ppf(confidence))
+    return float(1.0 + variance_numerator * (z / excess) ** 2)
+
+
+def minimum_backtest_length(sharpe: float, n_trials: int) -> float:
+    """Minimum Backtest Length in years (Bailey, Borwein, Lopez de Prado & Zhu, 2014).
+
+    The MinBTL of "Pseudo-Mathematics and Financial Charlatanism: The Effects
+    of Backtest Overfitting on Out-of-Sample Performance" (*Notices of the AMS*
+    61(5)): the backtest length below which the expected maximum annualised
+    Sharpe among ``n_trials`` independent trials of pure noise meets or exceeds
+    the observed annualised Sharpe -- i.e. the record is too short for the
+    result to be distinguishable from the best of a noise search::
+
+        MinBTL = [ ((1 - gamma) * Z^-1(1 - 1/N) + gamma * Z^-1(1 - 1/(N e)))
+                   / SR ]^2
+
+    with ``gamma`` the Euler-Mascheroni constant. The unit is *years* because
+    the null annualised-Sharpe estimate over ``y`` years has standard deviation
+    approximately ``1 / sqrt(y)``.
+
+    Parameters
+    ----------
+    sharpe:
+        Observed *annualised* Sharpe ratio (note: annualised, unlike the
+        per-period convention inside PSR/DSR -- this matches the paper).
+    n_trials:
+        Number of strategy configurations tried during research. Floored to
+        ``1``.
+
+    Returns
+    -------
+    float
+        Minimum backtest length in years. ``0.0`` for ``n_trials <= 1`` (no
+        selection took place, so no multiple-testing minimum applies); ``inf``
+        (fail-closed) when ``sharpe <= 0`` -- a non-positive Sharpe can never
+        exceed the expected best of two or more noise trials.
+    """
+    n = max(int(n_trials), 1)
+    if n <= 1:
+        return 0.0
+    if not math.isfinite(sharpe) or sharpe <= 0.0:
+        return float("inf")
+    # (1-gamma)*Z^-1(1-1/N) + gamma*Z^-1(1-1/(N e)) == the benchmark at sigma=1.
+    factor = expected_max_sharpe_benchmark(1.0, n)
+    return float((factor / float(sharpe)) ** 2)
 
 
 # ── Probability of Backtest Overfitting (CSCV) ────────────────────────────────

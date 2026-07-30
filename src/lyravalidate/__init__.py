@@ -20,10 +20,13 @@ from .stats import (
     hit_rate,
     information_coefficient,
     max_drawdown,
+    minimum_backtest_length,
+    minimum_track_record_length,
     probabilistic_sharpe_ratio,
     probability_of_backtest_overfitting,
     rank_information_coefficient,
     sharpe_ratio,
+    sharpe_standard_error,
 )
 
 __all__ = [
@@ -39,11 +42,14 @@ __all__ = [
     "hit_rate",
     "information_coefficient",
     "max_drawdown",
+    "minimum_backtest_length",
+    "minimum_track_record_length",
     "probabilistic_sharpe_ratio",
     "probability_of_backtest_overfitting",
     "rank_information_coefficient",
     "render_html",
     "render_markdown",
     "sharpe_ratio",
+    "sharpe_standard_error",
     "write_report",
 ]

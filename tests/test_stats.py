@@ -20,10 +20,13 @@ from lyravalidate.stats import (
     hit_rate,
     information_coefficient,
     max_drawdown,
+    minimum_backtest_length,
+    minimum_track_record_length,
     probabilistic_sharpe_ratio,
     probability_of_backtest_overfitting,
     rank_information_coefficient,
     sharpe_ratio,
+    sharpe_standard_error,
 )
 
 # ── Sharpe / drawdown helpers ─────────────────────────────────────────────────
@@ -121,6 +124,143 @@ def test_psr_strips_non_finite() -> None:
     assert probabilistic_sharpe_ratio(with_nan) == pytest.approx(
         probabilistic_sharpe_ratio(finite)
     )
+
+
+# ── Sharpe standard error ─────────────────────────────────────────────────────
+
+
+def test_sharpe_standard_error_hand_value() -> None:
+    # returns 0.01..0.04: SR=1.9364917, skew=0, non-excess kurtosis=1.64,
+    # sr_var=(1+0.16*3.75)/3=0.5333333 -> sigma=0.7302967 (same numbers as the
+    # hand-computed PSR test above).
+    r = np.array([0.01, 0.02, 0.03, 0.04])
+    assert sharpe_standard_error(r) == pytest.approx(math.sqrt(1.6 / 3.0), rel=1e-9)
+
+
+def test_sharpe_standard_error_degenerate_is_infinite() -> None:
+    # No information -> infinite uncertainty (the fail-closed direction here:
+    # 0.0 would claim perfect certainty and make any Sharpe look significant).
+    assert math.isinf(sharpe_standard_error([0.01, 0.02, 0.03]))  # T < 4
+    assert math.isinf(sharpe_standard_error([0.5, 0.5, 0.5, 0.5]))  # zero variance
+
+
+def test_sharpe_standard_error_shrinks_with_length() -> None:
+    rng = np.random.default_rng(15)
+    r = 0.001 + 0.01 * rng.standard_normal(2000)
+    assert sharpe_standard_error(r) < sharpe_standard_error(r[:200])
+
+
+# ── MinTRL ────────────────────────────────────────────────────────────────────
+
+
+def test_min_trl_hand_computed_value() -> None:
+    # returns 0.01..0.04: SR=1.9364917, skew=0, non-excess kurtosis=1.64, so the
+    # variance numerator is 1+0.16*3.75=1.6 (as in the PSR test above) and
+    # MinTRL = 1 + 1.6*(z_0.95/SR)^2 = 1 + 1.6*(1.6448536/1.9364917)^2 = 2.154365.
+    r = np.array([0.01, 0.02, 0.03, 0.04])
+    SR = 0.025 / 0.012909944487
+    z = float(norm.ppf(0.95))
+    expected = 1.0 + 1.6 * (z / SR) ** 2
+    assert expected == pytest.approx(2.154365, abs=1e-6)  # anchor the arithmetic itself
+    assert minimum_track_record_length(r, 0.0, confidence=0.95) == pytest.approx(
+        expected, rel=1e-9
+    )
+
+
+def test_min_trl_hand_computed_value_nonzero_benchmark() -> None:
+    # Same moments, benchmark SR*=1.0: MinTRL = 1 + 1.6*(z_0.95/(SR-1))^2 = 5.935903.
+    r = np.array([0.01, 0.02, 0.03, 0.04])
+    SR = 0.025 / 0.012909944487
+    z = float(norm.ppf(0.95))
+    expected = 1.0 + 1.6 * (z / (SR - 1.0)) ** 2
+    assert expected == pytest.approx(5.935903, abs=1e-6)
+    assert minimum_track_record_length(r, 1.0, confidence=0.95) == pytest.approx(
+        expected, rel=1e-9
+    )
+
+
+def test_min_trl_inverts_psr_exactly() -> None:
+    # Setting the confidence to the *observed* PSR must return the observed T:
+    # MinTRL is the exact algebraic inverse of the PSR in the sample length.
+    rng = np.random.default_rng(21)
+    r = 0.0005 + 0.01 * rng.standard_normal(750)
+    conf = probabilistic_sharpe_ratio(r, 0.0)
+    assert minimum_track_record_length(r, 0.0, confidence=conf) == pytest.approx(
+        750.0, rel=1e-9
+    )
+
+
+def test_min_trl_increases_with_confidence_and_benchmark() -> None:
+    rng = np.random.default_rng(33)
+    r = 0.001 + 0.01 * rng.standard_normal(500)
+    assert minimum_track_record_length(r, 0.0, confidence=0.99) > minimum_track_record_length(
+        r, 0.0, confidence=0.95
+    )
+    assert minimum_track_record_length(r, 0.05, confidence=0.95) > minimum_track_record_length(
+        r, 0.0, confidence=0.95
+    )
+
+
+def test_min_trl_unreachable_benchmark_is_infinite() -> None:
+    # SR exactly 0 vs benchmark 0: no track record length can ever reach the bar.
+    r = np.array([0.01, -0.01, 0.01, -0.01, 0.01, -0.01])
+    assert math.isinf(minimum_track_record_length(r, 0.0))
+    assert math.isinf(minimum_track_record_length(r, 1.0))
+
+
+def test_min_trl_degenerate_is_infinite() -> None:
+    assert math.isinf(minimum_track_record_length([0.01, 0.02, 0.03]))  # T < 4
+    assert math.isinf(minimum_track_record_length([0.5, 0.5, 0.5, 0.5]))  # zero variance
+
+
+def test_min_trl_rejects_bad_confidence() -> None:
+    r = np.array([0.01, 0.02, 0.03, 0.04])
+    for bad in (0.0, 1.0, -0.1, 1.5):
+        with pytest.raises(ValueError):
+            minimum_track_record_length(r, 0.0, confidence=bad)
+
+
+# ── MinBTL ────────────────────────────────────────────────────────────────────
+
+
+def test_min_btl_hand_computed_value() -> None:
+    # N=10 trials, observed annualised Sharpe 1.0:
+    # factor = (1-gamma)*Z^-1(0.9) + gamma*Z^-1(1-1/(10e)) = 1.574598,
+    # MinBTL = (factor/1.0)^2 = 2.479360 years.
+    n = 10
+    z1 = float(norm.ppf(1.0 - 1.0 / n))
+    z2 = float(norm.ppf(1.0 - 1.0 / (n * math.e)))
+    factor = (1.0 - EULER_MASCHERONI) * z1 + EULER_MASCHERONI * z2
+    expected = factor**2
+    assert expected == pytest.approx(2.479360, abs=1e-6)
+    assert minimum_backtest_length(1.0, n) == pytest.approx(expected, rel=1e-9)
+
+
+def test_min_btl_scales_inversely_with_sharpe_squared() -> None:
+    # Halving the target Sharpe quadruples the years of backtest needed.
+    assert minimum_backtest_length(0.5, 10) == pytest.approx(
+        4.0 * minimum_backtest_length(1.0, 10), rel=1e-12
+    )
+
+
+def test_min_btl_increases_with_trials() -> None:
+    assert (
+        minimum_backtest_length(1.0, 2)
+        < minimum_backtest_length(1.0, 10)
+        < minimum_backtest_length(1.0, 1000)
+    )
+
+
+def test_min_btl_single_trial_is_zero() -> None:
+    # No selection took place -> no multiple-testing minimum applies.
+    assert minimum_backtest_length(1.0, 1) == 0.0
+    assert minimum_backtest_length(1.0, 0) == 0.0
+
+
+def test_min_btl_non_positive_sharpe_is_infinite() -> None:
+    # A non-positive Sharpe can never exceed the expected best of >= 2 noise trials.
+    assert math.isinf(minimum_backtest_length(0.0, 10))
+    assert math.isinf(minimum_backtest_length(-1.0, 10))
 
 
 # ── expected-max-Sharpe benchmark ─────────────────────────────────────────────
