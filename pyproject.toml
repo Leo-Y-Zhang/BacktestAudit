@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lyravalidate"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lyra Validate - an honest, published-statistics verdict on whether a backtest edge is real or overfit. A measurement tool, not a money-maker."
 readme = "README.md"
 requires-python = ">=3.10"

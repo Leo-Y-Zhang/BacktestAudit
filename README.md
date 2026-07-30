@@ -26,6 +26,8 @@ It is built entirely on **published, peer-reviewed mathematics** and cites it:
 | Probabilistic Sharpe Ratio (PSR) | Bailey & López de Prado (2012), *The Sharpe Ratio Efficient Frontier* |
 | Deflated Sharpe Ratio (DSR) | Bailey & López de Prado (2014), *The Deflated Sharpe Ratio* |
 | Probability of Backtest Overfitting (PBO via CSCV) | Bailey, Borwein, López de Prado & Zhu (2017), *The Probability of Backtest Overfitting* |
+| Minimum Track Record Length (MinTRL) | Bailey & López de Prado (2012), *The Sharpe Ratio Efficient Frontier* |
+| Minimum Backtest Length (MinBTL) | Bailey, Borwein, López de Prado & Zhu (2014), *Pseudo-Mathematics and Financial Charlatanism* |
 | Purged + embargoed walk-forward CV | López de Prado (2018), *Advances in Financial Machine Learning*, ch. 7 |
 
 Dependencies are limited to `numpy`, `pandas`, and `scipy`. No network access is
@@ -83,11 +85,28 @@ deflated_sharpe: float    # probability the edge survives deflation
 pbo: float                # probability of backtest overfitting (NaN if N/A)
 sharpe: float             # annualised Sharpe
 n_trials: int             # configurations assumed tried
+min_track_record: float   # MinTRL: observations needed at the observed moments
+min_backtest_years: float # MinBTL: years needed to beat a best-of-n_trials noise search
 reasons: list[str]
 ```
 
 The decision is **default-deny**: a result is only `DEPLOYABLE` when the deflated
 Sharpe, the annualised Sharpe, and (when computable) the PBO all clear their bars.
+
+### The evidence gap
+
+A rejection also says *how much more evidence* would be needed. When the verdict
+fails on significance, the reasons quantify the gap: how many observations (and
+years, via `periods_per_year`) the record falls short of the closed-form
+**Minimum Track Record Length** (MinTRL) — the length at which the PSR against
+the same benchmark the deflation used would reach the significance bar, holding
+the observed Sharpe, skew and kurtosis fixed. When the Sharpe does not exceed
+that benchmark at all, no length ever suffices and the verdict says so
+(`min_track_record` is `inf`). When significance passes, the verdict confirms
+the observed length against MinTRL instead. For a searched record
+(`n_trials > 1`), the **Minimum Backtest Length** (MinBTL) additionally reports
+how many years of backtest are needed before the observed annualised Sharpe
+even exceeds the expected best of that many pure-noise trials.
 
 ## CLI
 
@@ -132,6 +151,7 @@ Verdict: DEPLOYABLE (deployable=True)
   Annualised Sharpe: 1.660
   PBO             : n/a
   Trials assumed  : 1
+  MinTRL          : 253 obs needed; have 1500 (sufficient)
 
 === 2) A cautionary tale: 50 noise configurations ===
 Verdict: PROBABLY_OVERFIT (deployable=False)
@@ -139,10 +159,14 @@ Verdict: PROBABLY_OVERFIT (deployable=False)
   Annualised Sharpe: 1.355
   PBO             : 0.495
   Trials assumed  : 50
+  MinTRL          : 914221 obs needed; have 750 (short 913471 obs ~ 3624.9 years)
+  MinBTL          : 2.8 years needed for 50 trials; have 3.0
 ```
 
 The second strategy has a *higher raw-looking* search but a deflated Sharpe near a
-coin flip and a PBO near 0.5 -- exactly the signature of overfitting.
+coin flip and a PBO near 0.5 -- exactly the signature of overfitting. Its MinTRL
+makes the evidence gap concrete: at these moments, a best-of-50 selection would
+need thousands of years of data before this Sharpe became significant.
 
 ## Thresholds are policy, not law
 
@@ -156,7 +180,15 @@ Faithful to the source papers: per-period (non-annualised) Sharpe inside PSR/DSR
 *non-excess* kurtosis (a normal sample is 3); biased Fisher–Pearson skew; the
 Euler–Mascheroni constant in the expected-maximum-Sharpe benchmark; natural-log
 logits and `rank / (N + 1)` in CSCV; **positional** (bar-count) purging so a
-business-day index is handled correctly. Degenerate inputs **fail closed**.
+business-day index is handled correctly. Degenerate inputs **fail closed**:
+probabilities return 0, and required-evidence statistics (MinTRL/MinBTL) return
+infinity.
+
+Beyond the hand-computed unit tests, a property-based layer (Hypothesis, a
+dev-only dependency) checks the mathematical contract on arbitrary valid
+inputs: PSR/DSR/PBO stay in [0, 1], deflation only ever lowers a probability,
+PBO is invariant to the order of candidate columns, and the purged walk-forward
+splitter never leaks a training label into the evaluation window.
 
 ## FAQ
 
