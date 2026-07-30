@@ -91,7 +91,10 @@ def _sharpe_moments(returns: npt.ArrayLike) -> tuple[int, float, float] | None:
     g3 = float(skew(r, bias=True))
     g4 = float(kurtosis(r, fisher=False))  # non-excess: a normal sample == 3
     sr_var = (1.0 - g3 * SR + (g4 - 1.0) / 4.0 * SR * SR) / (T - 1)
-    if sr_var <= 0.0:  # extreme skew/kurtosis can drive the estimator variance <= 0
+    # Extreme skew/kurtosis can drive the estimator variance <= 0, and on
+    # near-constant data (catastrophic cancellation) scipy's moments go NaN --
+    # a NaN would slip through a bare <= comparison, so demand finite-positive.
+    if not math.isfinite(sr_var) or sr_var <= 0.0:
         return None
     return T, SR, math.sqrt(sr_var)
 
@@ -339,8 +342,13 @@ def minimum_track_record_length(
 
     where ``Z_a = Phi^-1(confidence)``, ``g3`` is the (biased) skew and ``g4``
     the *non-excess* kurtosis -- the same variance formula the PSR uses, of
-    which MinTRL is the exact algebraic inverse in the sample length:
-    ``T >= MinTRL`` if and only if ``PSR(sr_benchmark) >= confidence``.
+    which MinTRL is the exact algebraic inverse in the sample length: for any
+    ``confidence > 0.5`` (every realistic significance bar, including the 0.95
+    default), ``T >= MinTRL`` if and only if
+    ``PSR(sr_benchmark) >= confidence``. For ``confidence <= 0.5`` the
+    non-positive normal quantile breaks the equivalence: a record whose Sharpe
+    does not exceed ``sr_benchmark`` fails closed to ``inf`` here even though
+    its PSR (at most one half in that regime) can still meet such a bar.
 
     Parameters
     ----------

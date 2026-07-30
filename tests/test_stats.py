@@ -208,6 +208,27 @@ def test_min_trl_unreachable_benchmark_is_infinite() -> None:
     assert math.isinf(minimum_track_record_length(r, 1.0))
 
 
+def test_near_constant_returns_fail_closed_not_nan() -> None:
+    # [0.01]*10 is constant, but 0.01 is not exactly representable, so the
+    # sample std is a tiny positive number and scipy skew/kurtosis go NaN under
+    # catastrophic cancellation. The NaN must not leak through the degenerate
+    # guard (NaN compares False against <= 0.0): everything fails closed.
+    r = [0.01] * 10
+    assert probabilistic_sharpe_ratio(r, 0.0) == 0.0
+    assert deflated_sharpe_ratio(r, 10) == 0.0
+    assert math.isinf(sharpe_standard_error(r))
+    assert math.isinf(minimum_track_record_length(r, 0.0))
+
+
+def test_min_trl_iff_with_psr_holds_only_above_half_confidence() -> None:
+    # The PSR equivalence is exact for confidence > 0.5 only: at SR == SR* the
+    # PSR is exactly 0.5 for every T (so it meets any bar <= 0.5), yet MinTRL
+    # fails closed to inf because no length ever *exceeds* the benchmark.
+    r = np.array([0.01, -0.01, 0.01, -0.01, 0.01, -0.01])  # SR exactly 0
+    assert probabilistic_sharpe_ratio(r, 0.0) == pytest.approx(0.5)
+    assert math.isinf(minimum_track_record_length(r, 0.0, confidence=0.3))
+
+
 def test_min_trl_degenerate_is_infinite() -> None:
     assert math.isinf(minimum_track_record_length([0.01, 0.02, 0.03]))  # T < 4
     assert math.isinf(minimum_track_record_length([0.5, 0.5, 0.5, 0.5]))  # zero variance
