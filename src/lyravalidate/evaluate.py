@@ -71,6 +71,9 @@ class Verdict:
     reasons: list[str] = field(default_factory=list)
     # Supplementary diagnostics (not gates):
     probabilistic_sharpe: float = float("nan")
+    # Finite observations actually judged. Every statistic drops NaN/inf
+    # entries (see lyravalidate.stats), so non-finite rows -- e.g. blank CSV
+    # cells -- are not evidence and are not counted here either.
     n_periods: int = 0
     periods_per_year: int = 252
     # Evidence gap: MinTRL (observations needed for the deflated Sharpe to reach
@@ -95,9 +98,11 @@ class Verdict:
         ]
         if not math.isnan(self.min_track_record):
             if math.isinf(self.min_track_record):
+                # inf can mean Sharpe <= benchmark, a degenerate record, or a
+                # confidence bar of 1 -- the reasons say which; stay neutral here.
                 lines.append(
-                    "  MinTRL          : unreachable at the observed moments "
-                    "(Sharpe does not exceed the benchmark)"
+                    "  MinTRL          : unreachable (fail-closed: no finite track "
+                    "record length reaches the significance bar)"
                 )
             else:
                 needed = math.ceil(self.min_track_record)
@@ -281,11 +286,14 @@ def evaluate(
     # Evidence gap: MinTRL against the same SR* the deflation used, at the policy
     # confidence -- so T >= MinTRL if and only if the DSR gate clears -- plus the
     # MinBTL for the observed annualised Sharpe and the size of the search.
-    n_obs = int(np.asarray(strategy).size)
+    # Count only finite observations: every statistic above drops NaN/inf
+    # entries, so the surfaced count must be the same T the thresholds were
+    # computed from -- otherwise blank rows would be credited as evidence and
+    # the shortfall arithmetic (and the MinTRL comparison) would be wrong.
+    n_obs = int(np.count_nonzero(np.isfinite(np.asarray(strategy, dtype=np.float64))))
     conf = thr.min_deflated_sharpe
-    deflation_benchmark = expected_max_sharpe_benchmark(
-        sharpe_standard_error(strategy), n_trials_eff
-    )
+    sigma_sr = sharpe_standard_error(strategy)  # inf on a degenerate record
+    deflation_benchmark = expected_max_sharpe_benchmark(sigma_sr, n_trials_eff)
     if conf >= 1.0:
         min_trl = float("inf")  # Phi^-1(1) is infinite: no finite record suffices
     elif conf <= 0.0:
@@ -305,11 +313,26 @@ def evaluate(
             "significant after deflating for trials and non-normality."
         )
         if math.isinf(min_trl):
-            reasons.append(
-                f"Evidence gap: no track record length reaches the {conf:.2f} bar at the "
-                "observed moments (the observed Sharpe does not exceed the deflation "
-                "benchmark)."
-            )
+            # Say *why* MinTRL is infinite: a policy bar of 1, a record too
+            # degenerate to measure, or a Sharpe below the benchmark are three
+            # different situations and only the last involves the benchmark.
+            if conf >= 1.0:
+                reasons.append(
+                    f"Evidence gap: a confidence bar of {conf:.2f} can never be "
+                    "reached by any finite track record."
+                )
+            elif math.isinf(sigma_sr):
+                reasons.append(
+                    "Evidence gap: the record is too degenerate to measure (fewer "
+                    "than four finite observations, zero variance, or extreme "
+                    "moments), so no required track record length can be quoted."
+                )
+            else:
+                reasons.append(
+                    f"Evidence gap: no track record length reaches the {conf:.2f} bar at "
+                    "the observed moments (the observed Sharpe does not exceed the "
+                    "deflation benchmark)."
+                )
         else:
             needed = math.ceil(min_trl)
             short = max(needed - n_obs, 0)

@@ -150,6 +150,24 @@ def test_cli_json_reports_evidence_gap_fields(
     assert payload["min_backtest_years"] == 0.0
 
 
+def test_cli_blank_cells_are_not_observations(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Blank CSV cells load as NaN and are dropped by every statistic, so they
+    must not be counted as track record in the JSON output either."""
+    rng = np.random.default_rng(9)
+    returns = 0.0003 + 0.01 * rng.standard_normal(800)  # modest edge, not significant
+    padded = np.concatenate([returns, np.full(1200, np.nan)])  # NaN -> blank cell
+    csv = tmp_path / "blanks.csv"
+    _write_returns(csv, padded.reshape(-1, 1), ["strategy"])
+
+    code = main([str(csv), "--n-trials", "1", "--json"])
+    out = capsys.readouterr().out
+    assert code == 1
+    payload = json.loads(out)
+    assert payload["n_periods"] == 800
+
+
 def test_cli_text_output_reports_min_trl(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -6,6 +6,8 @@ edge from noise from an overfit search is worse than useless.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -179,6 +181,61 @@ def test_min_trl_agrees_with_the_dsr_gate() -> None:
             )
         else:
             assert verdict.deflated_sharpe < 0.95
+
+
+@pytest.mark.parametrize("n_trials", [1, 25])
+def test_non_finite_observations_are_not_evidence(n_trials: int) -> None:
+    """NaN/inf entries are dropped by every statistic, so they must not count
+    as track record either: a padded series yields the identical verdict --
+    counts, shortfall arithmetic and reason strings -- as its finite subset.
+    """
+    rng = np.random.default_rng(9)
+    finite = 0.0003 + 0.01 * rng.standard_normal(800)  # modest edge
+    padded = np.concatenate([finite, np.full(300, np.nan), [np.inf, -np.inf]])
+    clean = evaluate(finite, n_trials=n_trials)
+    noisy = evaluate(padded, n_trials=n_trials)
+    assert clean.n_periods == 800
+    assert noisy.n_periods == 800
+    assert noisy.min_track_record == clean.min_track_record
+    assert noisy.min_backtest_years == clean.min_backtest_years
+    assert noisy.deflated_sharpe == clean.deflated_sharpe
+    assert noisy.reasons == clean.reasons
+    assert noisy.summary() == clean.summary()
+
+
+def test_nan_padding_cannot_fake_a_sufficient_track_record() -> None:
+    """Regression: enough NaN rows to push the *raw* length past MinTRL must
+    not make the verdict call the record sufficient while the DSR gate fails.
+    """
+    rng = np.random.default_rng(9)
+    finite = 0.0003 + 0.01 * rng.standard_normal(800)
+    base = evaluate(finite, n_trials=1)
+    assert base.deflated_sharpe < 0.95
+    assert np.isfinite(base.min_track_record)
+    needed = math.ceil(base.min_track_record)
+    padded = np.concatenate([finite, np.full(needed, np.nan)])  # raw size > MinTRL
+    verdict = evaluate(padded, n_trials=1)
+    assert verdict.n_periods == 800
+    # The MinTRL-vs-DSR equivalence must hold for the *surfaced* count too.
+    assert (verdict.n_periods >= verdict.min_track_record) == (
+        verdict.deflated_sharpe >= 0.95
+    )
+    assert "(sufficient)" not in verdict.summary()  # the MinTRL status marker
+    assert f"short {needed - 800} obs" in verdict.summary()
+    gap = next(r for r in verdict.reasons if r.startswith("Evidence gap"))
+    assert f"short about {needed - 800} observations" in gap
+
+
+def test_degenerate_record_evidence_gap_names_degeneracy_not_benchmark() -> None:
+    """A zero-variance record has no Sharpe-vs-benchmark comparison at all, so
+    the unreachable-MinTRL reason must name the degeneracy, not the benchmark.
+    """
+    verdict = evaluate([0.01] * 10, n_trials=1)
+    assert np.isinf(verdict.min_track_record)
+    gap = next(r for r in verdict.reasons if r.startswith("Evidence gap"))
+    assert "degenerate" in gap
+    assert "benchmark" not in gap
+    assert "unreachable" in verdict.summary()
 
 
 def test_matrix_verdict_reports_min_backtest_length() -> None:
