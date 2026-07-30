@@ -5,7 +5,10 @@ This script is fully offline and deterministic (seeded). It:
 1. Generates a sample ``sample_returns.csv`` next to this file (if missing),
 2. Evaluates that honest single strategy and prints the verdict,
 3. Writes a self-contained HTML report and a Markdown report beside it,
-4. As a cautionary tale, evaluates a 50-configuration noise matrix to show how
+4. Re-judges the *same* strategy on only its first 90 days, to show the
+   evidence-gap report: the verdict says how much more track record the
+   record falls short of, not just "no",
+5. As a cautionary tale, evaluates a 50-configuration noise matrix to show how
    Lyra Validate flags a search that found nothing but luck.
 
 Run it with::
@@ -59,7 +62,16 @@ def main() -> int:
     print(f"\nHTML report     -> {HTML_REPORT}")
     print(f"Markdown report -> {MARKDOWN_REPORT}")
 
-    print("\n=== 2) A cautionary tale: 50 noise configurations ===")
+    print("\n=== 2) The same strategy, judged on only its first 90 days ===")
+    young = evaluate(returns[:90], n_trials=1)
+    print(young.summary())
+    print(
+        "\nLesson: the same edge that is DEPLOYABLE on 1500 observations is "
+        "indistinguishable from luck on 90. The evidence gap quantifies exactly "
+        "how far short the record falls instead of just saying no."
+    )
+
+    print("\n=== 3) A cautionary tale: 50 noise configurations ===")
     rng = np.random.default_rng(0)
     candidates = 0.01 * rng.standard_normal((750, 50))
     overfit = evaluate(candidates)  # picks the in-sample best, deflates by 50, computes PBO

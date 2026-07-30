@@ -51,7 +51,9 @@ returns = 0.0008 + 0.01 * rng.standard_normal(1000)
 
 verdict = evaluate(returns, n_trials=1)
 print(verdict.classification)   # DEPLOYABLE / NOT_DEPLOYABLE / PROBABLY_OVERFIT
-# This particular random sample lands just below the Sharpe bar -> NOT_DEPLOYABLE.
+# This particular random sample misses both bars (annualised Sharpe 0.52 <= 0.75,
+# deflated Sharpe 0.85 < 0.95) -> NOT_DEPLOYABLE, and summary() reports the
+# evidence gap: 2537 observations needed at these moments, 1000 held.
 # The worked example further down generates a stronger series that comes back DEPLOYABLE.
 print(verdict.summary())
 ```
@@ -62,7 +64,8 @@ estimate and an honest, search-aware deflation:
 ```python
 candidates = rng.standard_normal((500, 50))   # 50 configs you tried
 verdict = evaluate(candidates)                 # picks the best, deflates by 50
-# best-of-50 pure noise: PBO ~0.41 and the deflated Sharpe collapses -> PROBABLY_OVERFIT
+# best-of-50 pure noise: PBO 0.33 and the deflated Sharpe drops to 0.80,
+# well under the 0.95 bar -> PROBABLY_OVERFIT
 print(verdict.pbo, verdict.classification)
 ```
 
@@ -142,9 +145,11 @@ means.
 ## Worked example
 
 A runnable, fully-offline demo lives in [`examples/run_example.py`](examples/run_example.py).
-It generates a deterministic `examples/sample_returns.csv`, evaluates it, writes
-an HTML and a Markdown report, and then -- as a cautionary tale -- evaluates a
-50-configuration noise matrix to show how a hard search over noise gets flagged:
+It generates a deterministic `examples/sample_returns.csv`, evaluates it (and
+writes an HTML and a Markdown report), re-judges the *same* strategy on only its
+first 90 days to show the evidence-gap report, and finally -- as a cautionary
+tale -- evaluates a 50-configuration noise matrix to show how a hard search over
+noise gets flagged:
 
 ```bash
 python examples/run_example.py
@@ -158,21 +163,47 @@ Verdict: DEPLOYABLE (deployable=True)
   PBO             : n/a
   Trials assumed  : 1
   MinTRL          : 253 obs needed; have 1500 (sufficient)
+  Reasons:
+    - MinTRL confirmed: 1500 observations against a minimum of 253 for the 0.95 bar at the observed moments.
+    - Clears the deflated-Sharpe, Sharpe and PBO bars.
 
-=== 2) A cautionary tale: 50 noise configurations ===
+=== 2) The same strategy, judged on only its first 90 days ===
+Verdict: NOT_DEPLOYABLE (deployable=False)
+  Deflated Sharpe : 0.586 (probability the edge is real after deflation)
+  Annualised Sharpe: 0.366
+  PBO             : n/a
+  Trials assumed  : 1
+  MinTRL          : 5070 obs needed; have 90 (short 4980 obs ~ 19.8 years)
+  Reasons:
+    - Deflated Sharpe 0.586 < 0.95: the Sharpe is not significant after deflating for trials and non-normality.
+    - Evidence gap: 5070 observations are needed at the observed moments to reach the 0.95 bar; the record has 90 - short about 4980 observations (~19.8 years).
+    - Annualised Sharpe 0.366 <= 0.75: insufficient risk-adjusted return.
+
+=== 3) A cautionary tale: 50 noise configurations ===
 Verdict: PROBABLY_OVERFIT (deployable=False)
-  Deflated Sharpe : 0.519
+  Deflated Sharpe : 0.519 (probability the edge is real after deflation)
   Annualised Sharpe: 1.355
   PBO             : 0.495
   Trials assumed  : 50
   MinTRL          : 914221 obs needed; have 750 (short 913471 obs ~ 3624.9 years)
   MinBTL          : 2.8 years needed for 50 trials; have 3.0
+  Reasons:
+    - Deflated Sharpe 0.519 < 0.95: the Sharpe is not significant after deflating for trials and non-normality.
+    - Evidence gap: 914221 observations are needed at the observed moments to reach the 0.95 bar; the record has 750 - short about 913471 observations (~3624.9 years).
 ```
 
-The second strategy has a *higher raw-looking* search but a deflated Sharpe near a
-coin flip and a PBO near 0.5 -- exactly the signature of overfitting. Its MinTRL
-makes the evidence gap concrete: at these moments, a best-of-50 selection would
-need thousands of years of data before this Sharpe became significant.
+Scene 2 is the evidence-gap report doing its job: the same edge that is
+`DEPLOYABLE` on 1500 observations is indistinguishable from luck on 90, and
+instead of a bare "no" the verdict says the record is about 4980 observations
+(~19.8 years) short of certifying the modest Sharpe it has shown *so far*. Weak
+observed Sharpes need enormous track records -- that is the closed-form MinTRL
+arithmetic, not an opinion.
+
+Scene 3 still shows a healthy-looking annualised Sharpe of 1.36, but a deflated
+Sharpe near a coin flip and a PBO near 0.5 -- exactly the signature of
+overfitting. Its MinTRL makes the evidence gap concrete: at these moments, a
+best-of-50 selection would need thousands of years of data before this Sharpe
+became significant.
 
 ## Thresholds are policy, not law
 
@@ -190,11 +221,27 @@ business-day index is handled correctly. Degenerate inputs **fail closed**:
 probabilities return 0, and required-evidence statistics (MinTRL/MinBTL) return
 infinity.
 
-Beyond the hand-computed unit tests, a property-based layer (Hypothesis, a
-dev-only dependency) checks the mathematical contract on arbitrary valid
-inputs: PSR/DSR/PBO stay in [0, 1], deflation only ever lowers a probability,
-PBO is invariant to the order of candidate columns, and the purged walk-forward
-splitter never leaks a training label into the evaluation window.
+## Machine-checked invariants
+
+The suite is 116 tests. Most anchor on hand-computed values from the source
+papers; on top of those, a property-based layer
+([`tests/test_properties.py`](tests/test_properties.py), Hypothesis as a
+dev-only dependency) machine-checks the mathematical contract on arbitrary
+valid inputs -- the return-series cases with NaN/inf entries injected, since
+the statistics are contracted to drop non-finite observations:
+
+- PSR, DSR and PBO are probabilities: always in `[0, 1]`.
+- PSR is monotonically non-increasing in the benchmark Sharpe.
+- DSR is non-increasing in `n_trials`, and `DSR <= PSR` for `n_trials > 1`:
+  deflation can only ever lower a probability.
+- PBO is invariant under column permutation of the candidate matrix (CSCV must
+  not care which order the configurations were tried in).
+- The purged, embargoed walk-forward splitter never leaves a training index
+  within `label_horizon` of the evaluation window, for arbitrary valid window
+  parameters.
+
+The Hypothesis profile is deterministic (`derandomize=True`) with bounded
+example counts, so the suite stays fast and reproducible run-to-run.
 
 ## FAQ
 

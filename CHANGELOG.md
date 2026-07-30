@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [0.2.1] - 2026-07-30
 
+### Changed
+- The worked example (`examples/run_example.py`) gained a middle scene: the
+  same demo strategy judged on only its first 90 days, producing a
+  `NOT_DEPLOYABLE` verdict whose reasons quantify the evidence gap. The README
+  worked-example section now pastes the real output of all three scenes,
+  reasons included. No library behaviour changed.
+
 ### Fixed
 - The evidence gap now counts only finite observations. `n_periods`, the
   MinTRL shortfall arithmetic in the reasons, `summary()`, the report
