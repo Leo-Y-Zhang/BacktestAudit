@@ -127,3 +127,69 @@ def test_reasons_present_when_rejected() -> None:
     returns = 0.01 * rng.standard_normal(1000)
     verdict = evaluate(returns, n_trials=1)
     assert verdict.reasons  # non-empty explanation on rejection
+
+
+# ── evidence gap (MinTRL / MinBTL) ────────────────────────────────────────────
+
+
+def test_passing_verdict_confirms_track_record_length() -> None:
+    """On a significant record, MinTRL is finite, met, and confirmed in reasons."""
+    rng = np.random.default_rng(42)
+    returns = 0.0008 + 0.008 * rng.standard_normal(1500)
+    verdict = evaluate(returns, n_trials=1)
+    assert verdict.deployable is True
+    assert np.isfinite(verdict.min_track_record)
+    assert verdict.min_track_record <= verdict.n_periods
+    assert verdict.min_backtest_years == 0.0  # single trial: no selection minimum
+    assert any("MinTRL" in r for r in verdict.reasons)
+    assert "MinTRL" in verdict.summary()
+
+
+def test_failing_verdict_reports_evidence_gap() -> None:
+    """A real-but-weak edge fails significance with a finite observation gap."""
+    rng = np.random.default_rng(9)
+    returns = 0.0003 + 0.01 * rng.standard_normal(800)  # modest edge
+    verdict = evaluate(returns, n_trials=1)
+    assert verdict.deployable is False
+    assert verdict.deflated_sharpe < 0.95
+    assert np.isfinite(verdict.min_track_record)
+    assert verdict.min_track_record > verdict.n_periods
+    assert any("Evidence gap" in r for r in verdict.reasons)
+    assert "MinTRL" in verdict.summary()
+
+
+def test_negative_drift_evidence_gap_is_unreachable() -> None:
+    """With a non-positive Sharpe no track record length ever reaches the bar."""
+    rng = np.random.default_rng(8)
+    returns = -0.001 + 0.01 * rng.standard_normal(500)
+    verdict = evaluate(returns, n_trials=1)
+    assert np.isinf(verdict.min_track_record)
+    assert any("Evidence gap" in r for r in verdict.reasons)
+
+
+def test_min_trl_agrees_with_the_dsr_gate() -> None:
+    """T >= MinTRL if and only if the DSR clears the bar (same formula, inverted)."""
+    for seed in (1, 9, 42, 123, 2024):
+        rng = np.random.default_rng(seed)
+        returns = 0.0004 + 0.009 * rng.standard_normal(900)
+        verdict = evaluate(returns, n_trials=1)
+        if np.isfinite(verdict.min_track_record):
+            assert (verdict.n_periods >= verdict.min_track_record) == (
+                verdict.deflated_sharpe >= 0.95
+            )
+        else:
+            assert verdict.deflated_sharpe < 0.95
+
+
+def test_matrix_verdict_reports_min_backtest_length() -> None:
+    """A searched candidate matrix gets a positive MinBTL in years."""
+    rng = np.random.default_rng(2024)
+    candidates = 0.01 * rng.standard_normal((600, 60))
+    verdict = evaluate(candidates)
+    assert verdict.n_trials == 60
+    assert verdict.min_backtest_years > 0.0
+    assert "MinBTL" in verdict.summary()
+    # 600 daily bars ~ 2.4 years is far short of the MinBTL for a best-of-60
+    # noise search at this Sharpe, so the shortfall is called out.
+    assert verdict.min_backtest_years > verdict.n_periods / verdict.periods_per_year
+    assert any("MinBTL" in r for r in verdict.reasons)

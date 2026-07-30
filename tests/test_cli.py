@@ -130,6 +130,24 @@ def test_cli_json_output_is_valid(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert payload["deployable"] is True
     assert payload["pbo"] is None  # NaN -> null for a single strategy
     assert "disclaimer" in payload
+    # Evidence-gap fields: MinTRL is finite and met here; a single trial has no
+    # multiple-testing minimum backtest length.
+    assert 0 < payload["min_track_record"] <= payload["n_periods"]
+    assert payload["min_backtest_years"] == 0.0
+
+
+def test_cli_text_output_reports_min_trl(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rng = np.random.default_rng(4)
+    returns = 0.0008 + 0.008 * rng.standard_normal(1500)
+    csv = tmp_path / "good.csv"
+    _write_returns(csv, returns.reshape(-1, 1), ["strategy"])
+
+    code = main([str(csv), "--n-trials", "1"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "MinTRL" in out
 
 
 def test_cli_trials_alias(tmp_path: Path) -> None:

@@ -126,3 +126,19 @@ def test_citations_mention_published_methods() -> None:
     assert "Bailey" in CITATIONS
     assert "Deflated Sharpe" in CITATIONS
     assert "CSCV" in CITATIONS
+    assert "MinTRL" in CITATIONS
+    assert "MinBTL" in CITATIONS
+
+
+def test_reports_surface_the_evidence_gap() -> None:
+    # Single strategy: the MinTRL diagnostic row appears in both renderings.
+    verdict = _deployable_verdict()
+    md = render_markdown(verdict, generated_at=_FIXED)
+    page = render_html(verdict, generated_at=_FIXED)
+    assert "MinTRL" in md
+    assert "MinTRL" in page
+    # A searched matrix additionally shows the MinBTL row.
+    overfit = _overfit_verdict()
+    assert overfit.n_trials > 1
+    assert "MinBTL" in render_markdown(overfit, generated_at=_FIXED)
+    assert "MinBTL" in render_html(overfit, generated_at=_FIXED)

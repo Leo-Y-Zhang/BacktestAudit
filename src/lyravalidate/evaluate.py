@@ -27,9 +27,13 @@ from .crossval import PurgedWalkForwardSplitter, default_walk_forward_splitter
 from .stats import (
     annualized_sharpe,
     deflated_sharpe_ratio,
+    expected_max_sharpe_benchmark,
     information_coefficient,
+    minimum_backtest_length,
+    minimum_track_record_length,
     probabilistic_sharpe_ratio,
     probability_of_backtest_overfitting,
+    sharpe_standard_error,
 )
 
 __all__ = ["Thresholds", "Verdict", "evaluate"]
@@ -69,6 +73,12 @@ class Verdict:
     probabilistic_sharpe: float = float("nan")
     n_periods: int = 0
     periods_per_year: int = 252
+    # Evidence gap: MinTRL (observations needed for the deflated Sharpe to reach
+    # the significance bar at the observed moments; inf = unreachable, NaN = not
+    # computed) and MinBTL (years of backtest needed for the observed Sharpe to
+    # beat the expected best of n_trials noise trials; NaN = not computed).
+    min_track_record: float = float("nan")
+    min_backtest_years: float = float("nan")
     oos_sharpe: float | None = None
     oos_information_coefficient: float | None = None
 
@@ -83,6 +93,34 @@ class Verdict:
             f"  PBO             : {pbo}",
             f"  Trials assumed  : {self.n_trials}",
         ]
+        if not math.isnan(self.min_track_record):
+            if math.isinf(self.min_track_record):
+                lines.append(
+                    "  MinTRL          : unreachable at the observed moments "
+                    "(Sharpe does not exceed the benchmark)"
+                )
+            else:
+                needed = math.ceil(self.min_track_record)
+                if self.n_periods >= self.min_track_record:
+                    status = "sufficient"
+                else:
+                    short = needed - self.n_periods
+                    years = short / self.periods_per_year
+                    status = f"short {short} obs ~ {years:.1f} years"
+                lines.append(
+                    f"  MinTRL          : {needed} obs needed; have {self.n_periods} ({status})"
+                )
+        if self.n_trials > 1 and not math.isnan(self.min_backtest_years):
+            if math.isinf(self.min_backtest_years):
+                lines.append(
+                    "  MinBTL          : unattainable (observed Sharpe is not positive)"
+                )
+            else:
+                observed_years = self.n_periods / self.periods_per_year
+                lines.append(
+                    f"  MinBTL          : {self.min_backtest_years:.1f} years needed for "
+                    f"{self.n_trials} trials; have {observed_years:.1f}"
+                )
         if self.oos_sharpe is not None:
             lines.append(f"  Walk-forward OOS Sharpe: {self.oos_sharpe:.3f}")
         if self.reasons:
@@ -240,6 +278,23 @@ def evaluate(
     dsr = deflated_sharpe_ratio(strategy, n_trials_eff)
     psr = probabilistic_sharpe_ratio(strategy, 0.0)
 
+    # Evidence gap: MinTRL against the same SR* the deflation used, at the policy
+    # confidence -- so T >= MinTRL if and only if the DSR gate clears -- plus the
+    # MinBTL for the observed annualised Sharpe and the size of the search.
+    n_obs = int(np.asarray(strategy).size)
+    conf = thr.min_deflated_sharpe
+    deflation_benchmark = expected_max_sharpe_benchmark(
+        sharpe_standard_error(strategy), n_trials_eff
+    )
+    if conf >= 1.0:
+        min_trl = float("inf")  # Phi^-1(1) is infinite: no finite record suffices
+    elif conf <= 0.0:
+        min_trl = 0.0  # a non-positive bar is met by any record
+    else:
+        min_trl = minimum_track_record_length(strategy, deflation_benchmark, confidence=conf)
+    min_btl = minimum_backtest_length(sharpe, n_trials_eff)
+    observed_years = n_obs / periods_per_year
+
     reasons: list[str] = []
     fail = False
 
@@ -248,6 +303,31 @@ def evaluate(
         reasons.append(
             f"Deflated Sharpe {dsr:.3f} < {thr.min_deflated_sharpe:.2f}: the Sharpe is not "
             "significant after deflating for trials and non-normality."
+        )
+        if math.isinf(min_trl):
+            reasons.append(
+                f"Evidence gap: no track record length reaches the {conf:.2f} bar at the "
+                "observed moments (the observed Sharpe does not exceed the deflation "
+                "benchmark)."
+            )
+        else:
+            needed = math.ceil(min_trl)
+            short = max(needed - n_obs, 0)
+            reasons.append(
+                f"Evidence gap: {needed} observations are needed at the observed moments "
+                f"to reach the {conf:.2f} bar; the record has {n_obs} - short about "
+                f"{short} observations (~{short / periods_per_year:.1f} years)."
+            )
+        if n_trials_eff > 1 and math.isfinite(min_btl) and observed_years < min_btl:
+            reasons.append(
+                f"MinBTL: {min_btl:.1f} years of backtest are needed for the observed Sharpe "
+                f"to clear the expected best of {n_trials_eff} noise trials; the record "
+                f"spans {observed_years:.1f} years."
+            )
+    elif math.isfinite(min_trl):
+        reasons.append(
+            f"MinTRL confirmed: {n_obs} observations against a minimum of "
+            f"{math.ceil(min_trl)} for the {conf:.2f} bar at the observed moments."
         )
     if sharpe <= thr.min_sharpe:
         fail = True
@@ -282,8 +362,10 @@ def evaluate(
         n_trials=n_trials_eff,
         reasons=reasons,
         probabilistic_sharpe=psr,
-        n_periods=int(np.asarray(strategy).size),
+        n_periods=n_obs,
         periods_per_year=periods_per_year,
+        min_track_record=min_trl,
+        min_backtest_years=min_btl,
         oos_sharpe=oos_sharpe,
         oos_information_coefficient=oos_ic,
     )

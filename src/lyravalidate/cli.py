@@ -134,6 +134,8 @@ def _verdict_to_dict(verdict: Verdict) -> dict[str, Any]:
         "n_trials": verdict.n_trials,
         "n_periods": verdict.n_periods,
         "periods_per_year": verdict.periods_per_year,
+        "min_track_record": _finite_or_none(verdict.min_track_record),
+        "min_backtest_years": _finite_or_none(verdict.min_backtest_years),
         "oos_sharpe": _finite_or_none(verdict.oos_sharpe),
         "oos_information_coefficient": _finite_or_none(verdict.oos_information_coefficient),
         "reasons": list(verdict.reasons),

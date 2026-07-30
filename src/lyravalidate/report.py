@@ -42,8 +42,11 @@ DISCLAIMER = (
 
 CITATIONS = (
     "References:\n"
-    "  - Bailey & Lopez de Prado (2012), The Sharpe Ratio Efficient Frontier (PSR).\n"
+    "  - Bailey & Lopez de Prado (2012), The Sharpe Ratio Efficient Frontier "
+    "(PSR, MinTRL).\n"
     "  - Bailey & Lopez de Prado (2014), The Deflated Sharpe Ratio (DSR).\n"
+    "  - Bailey, Borwein, Lopez de Prado & Zhu (2014), Pseudo-Mathematics and "
+    "Financial Charlatanism (MinBTL).\n"
     "  - Bailey, Borwein, Lopez de Prado & Zhu (2017), The Probability of Backtest "
     "Overfitting (PBO via CSCV).\n"
     "  - Lopez de Prado (2018), Advances in Financial Machine Learning, ch. 7 "
@@ -51,8 +54,10 @@ CITATIONS = (
 )
 
 _REFERENCES: tuple[str, ...] = (
-    "Bailey & Lopez de Prado (2012), The Sharpe Ratio Efficient Frontier (PSR).",
+    "Bailey & Lopez de Prado (2012), The Sharpe Ratio Efficient Frontier (PSR, MinTRL).",
     "Bailey & Lopez de Prado (2014), The Deflated Sharpe Ratio (DSR).",
+    "Bailey, Borwein, Lopez de Prado & Zhu (2014), Pseudo-Mathematics and Financial "
+    "Charlatanism (MinBTL).",
     "Bailey, Borwein, Lopez de Prado & Zhu (2017), The Probability of Backtest "
     "Overfitting (PBO via CSCV).",
     "Lopez de Prado (2018), Advances in Financial Machine Learning, ch. 7 "
@@ -192,6 +197,20 @@ def _diagnostics(verdict: Verdict) -> list[tuple[str, str]]:
     ]
     if math.isfinite(verdict.probabilistic_sharpe):
         rows.append(("Probabilistic Sharpe (vs 0)", f"{verdict.probabilistic_sharpe:.3f}"))
+    if not math.isnan(verdict.min_track_record):
+        min_trl = (
+            "unreachable at the observed moments"
+            if math.isinf(verdict.min_track_record)
+            else str(math.ceil(verdict.min_track_record))
+        )
+        rows.append(("Minimum track record length (MinTRL, obs)", min_trl))
+    if verdict.n_trials > 1 and not math.isnan(verdict.min_backtest_years):
+        min_btl = (
+            "unattainable (Sharpe not positive)"
+            if math.isinf(verdict.min_backtest_years)
+            else f"{verdict.min_backtest_years:.1f}"
+        )
+        rows.append(("Minimum backtest length (MinBTL, years)", min_btl))
     if verdict.oos_sharpe is not None:
         rows.append(("Walk-forward OOS Sharpe", f"{verdict.oos_sharpe:.3f}"))
     if verdict.oos_information_coefficient is not None:
