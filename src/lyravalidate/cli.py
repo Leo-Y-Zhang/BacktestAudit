@@ -118,18 +118,91 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _not_returns_reason(name: object, values: npt.NDArray[np.float64]) -> str | None:
+    """Why ``values`` cannot be a per-period return series, or None if it could be.
+
+    This tool exists to refuse things, so the one input it must never accept
+    silently is a column that is not returns at all. ``select_dtypes(["number"])``
+    alone accepts the row counter that ``DataFrame.to_csv()`` writes by default,
+    and a counter rises every period with no drawdown, which is the highest
+    Sharpe any column can have. Left unchecked it is selected as the in-sample
+    best and certified DEPLOYABLE -- the exact inversion of the product.
+
+    Both tests are deliberately blunt, because a false rejection is a loud error
+    the user can fix with --column while a false acceptance is a silent lie:
+    a monotone run is only called out once it is long enough that no real return
+    series would be monotone by chance, and the magnitude bound is set where a
+    "return" is unarguably a price, level or date instead.
+    """
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return "every value is NaN or infinite"
+    if finite.size >= 8:
+        steps = np.diff(finite)
+        if np.all(steps > 0):
+            return (
+                "it increases at every one of its steps, so it is a row counter, "
+                "index, date or cumulative level rather than per-period returns"
+            )
+        if np.all(steps < 0):
+            return "it decreases at every one of its steps, so it is a level, not returns"
+    biggest = float(np.max(np.abs(finite)))
+    if biggest > 10.0:
+        return (
+            f"its largest magnitude is {biggest:.6g}, which as a per-period return "
+            f"would be a {biggest * 100:.0f}% move; that is a price, level or date, "
+            f"not a return"
+        )
+    return None
+
+
 def _load_returns(path: str, column: str | None) -> npt.NDArray[np.float64]:
     frame = pd.read_csv(path)
     numeric = frame.select_dtypes(include=["number"])
     if numeric.shape[1] == 0:
         raise ValueError(f"No numeric columns found in {path!r}.")
+
     if column is not None:
         if column not in numeric.columns:
             available = ", ".join(map(str, numeric.columns))
             raise ValueError(
                 f"Column {column!r} not found among numeric columns ({available})."
             )
-        return np.asarray(numeric[column].to_numpy(), dtype=np.float64)
+        chosen = np.asarray(numeric[column].to_numpy(), dtype=np.float64)
+        reason = _not_returns_reason(column, chosen)
+        if reason is not None:
+            raise ValueError(f"Column {column!r} cannot be per-period returns: {reason}.")
+        return chosen
+
+    # pandas writes the frame index as an unnamed leading column, so a file
+    # produced by a plain to_csv() arrives here with a counter beside the data.
+    dropped: list[str] = []
+    for name in list(numeric.columns):
+        if isinstance(name, str) and name.startswith("Unnamed:"):
+            numeric = numeric.drop(columns=[name])
+            dropped.append(str(name))
+
+    rejected: list[str] = []
+    for name in list(numeric.columns):
+        reason = _not_returns_reason(name, np.asarray(numeric[name].to_numpy(), dtype=np.float64))
+        if reason is not None:
+            numeric = numeric.drop(columns=[name])
+            rejected.append(f"{name!r} ({reason})")
+
+    if numeric.shape[1] == 0:
+        detail = "; ".join(rejected) if rejected else "none were usable"
+        raise ValueError(
+            f"No column in {path!r} looks like per-period returns: {detail}. "
+            f"Pass --column to name the one that is."
+        )
+    if rejected or dropped:
+        skipped = ", ".join(dropped + rejected)
+        print(
+            f"note: ignored {len(dropped) + len(rejected)} column(s) that are not "
+            f"per-period returns: {skipped}",
+            file=sys.stderr,
+        )
+
     if numeric.shape[1] == 1:
         return np.asarray(numeric.iloc[:, 0].to_numpy(), dtype=np.float64)
     return np.asarray(numeric.to_numpy(), dtype=np.float64)

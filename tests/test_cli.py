@@ -248,3 +248,66 @@ def test_cli_matrix_json_reports_effective_trials(
     payload = json.loads(out)
     assert payload["effective_trials"] is None  # explicit count: published path
     assert payload["cross_trial_sharpe_std"] is None
+
+
+# Every test above writes its CSV with index=False, which is why none of them
+# caught the following: a user exporting with a plain to_csv() ships the row
+# counter as an unnamed numeric column, and a counter rises every period with no
+# drawdown, so it is the highest-Sharpe column in the file.
+
+
+def test_index_column_from_a_plain_to_csv_is_not_treated_as_a_strategy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rng = np.random.default_rng(20260731)
+    returns = 0.01 * rng.standard_normal(500)
+
+    with_index = tmp_path / "with_index.csv"
+    pd.DataFrame({"strategy": returns}).to_csv(with_index)  # index=True by default
+    assert "Unnamed: 0" in pd.read_csv(with_index).columns  # the defect's entry point
+
+    code = main([str(with_index), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    # One strategy was exported, so exactly one trial must be judged - not two,
+    # and certainly not a counter with an annualised Sharpe in the twenties.
+    assert payload["n_trials"] == 1
+    assert payload["classification"] == "NOT_DEPLOYABLE"
+    assert code == 1
+
+    without_index = tmp_path / "without_index.csv"
+    _write_returns(without_index, returns.reshape(-1, 1), ["strategy"])
+    assert main([str(without_index), "--json"]) == code
+    assert json.loads(capsys.readouterr().out)["annualised_sharpe"] == pytest.approx(
+        payload["annualised_sharpe"]
+    )
+
+
+def test_naming_a_counter_column_is_refused_rather_than_certified(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rng = np.random.default_rng(7)
+    csv = tmp_path / "with_index.csv"
+    pd.DataFrame({"strategy": 0.01 * rng.standard_normal(400)}).to_csv(csv)
+
+    code = main([str(csv), "--column", "Unnamed: 0"])
+    err = capsys.readouterr().err
+
+    assert code != 0
+    assert "cannot be per-period returns" in err
+    assert "DEPLOYABLE" not in err
+
+
+def test_a_price_level_column_is_rejected_as_returns(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rng = np.random.default_rng(11)
+    prices = 100.0 * np.exp(np.cumsum(0.01 * rng.standard_normal(400)))
+    csv = tmp_path / "prices.csv"
+    _write_returns(csv, prices.reshape(-1, 1), ["close"])
+
+    code = main([str(csv)])
+    err = capsys.readouterr().err
+
+    assert code != 0
+    assert "not a return" in err
