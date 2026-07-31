@@ -74,7 +74,10 @@ def main() -> int:
     print("\n=== 3) A cautionary tale: 50 noise configurations ===")
     rng = np.random.default_rng(0)
     candidates = 0.01 * rng.standard_normal((750, 50))
-    overfit = evaluate(candidates)  # picks the in-sample best, deflates by 50, computes PBO
+    # Picks the in-sample best, computes PBO, and -- because no n_trials is
+    # given -- measures the deflation benchmark from the matrix itself
+    # (cross-trial Sharpe dispersion across the effective trials).
+    overfit = evaluate(candidates)
     print(overfit.summary())
     print(
         "\nLesson: search hard enough over noise and *something* will look great in-sample. "

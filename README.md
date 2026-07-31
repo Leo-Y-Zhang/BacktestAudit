@@ -28,6 +28,7 @@ It is built entirely on **published, peer-reviewed mathematics** and cites it:
 | Probability of Backtest Overfitting (PBO via CSCV) | Bailey, Borwein, López de Prado & Zhu (2017), *The Probability of Backtest Overfitting* |
 | Minimum Track Record Length (MinTRL) | Bailey & López de Prado (2012), *The Sharpe Ratio Efficient Frontier* |
 | Minimum Backtest Length (MinBTL) | Bailey, Borwein, López de Prado & Zhu (2014), *Pseudo-Mathematics and Financial Charlatanism* |
+| Effective trials & matrix-measured DSR benchmark | López de Prado & Lewis (2019), *Detection of False Investment Strategies Using Unsupervised Learning Methods* |
 | Purged + embargoed walk-forward CV | López de Prado (2018), *Advances in Financial Machine Learning*, ch. 7 |
 
 Dependencies are limited to `numpy`, `pandas`, and `scipy`. No network access is
@@ -63,9 +64,10 @@ estimate and an honest, search-aware deflation:
 
 ```python
 candidates = rng.standard_normal((500, 50))   # 50 configs you tried
-verdict = evaluate(candidates)                 # picks the best, deflates by 50
-# best-of-50 pure noise: PBO 0.33 and the deflated Sharpe drops to 0.80,
-# well under the 0.95 bar -> PROBABLY_OVERFIT
+verdict = evaluate(candidates)                 # picks the best, measures the search
+# best-of-50 pure noise: PBO 0.33, 50 effective trials measured from the
+# matrix, and the deflated Sharpe comes out 0.67 - well under the 0.95 bar
+# -> PROBABLY_OVERFIT
 print(verdict.pbo, verdict.classification)
 ```
 
@@ -91,6 +93,8 @@ n_trials: int             # configurations assumed tried
 n_periods: int            # finite observations judged (NaN/inf rows are not evidence)
 min_track_record: float   # MinTRL: observations needed at the observed moments
 min_backtest_years: float # MinBTL: years needed to beat a best-of-n_trials noise search
+effective_trials: int | None        # correlation clusters measured from a matrix
+cross_trial_sharpe_std: float | None # measured per-period Sharpe dispersion across them
 reasons: list[str]
 ```
 
@@ -116,6 +120,32 @@ Only finite observations count as evidence: every statistic drops NaN/inf
 entries (blank CSV cells load as NaN), and `n_periods` and the shortfall
 arithmetic exclude them too, so padding a record with blank rows cannot shrink
 the reported gap.
+
+### Matrix-faithful deflation — and its trust model
+
+When you pass a `T x N` candidate matrix **without** `n_trials`, the matrix is
+taken to be the whole search and the DSR benchmark is *measured* from it
+(López de Prado & Lewis 2019) instead of approximated: correlated
+configurations are grouped into clusters (a parameter sweep around one idea is
+**one** trial, however many columns it produced), the benchmark is built from
+the cross-trial Sharpe dispersion across those *effective* trials, and both
+figures are surfaced as `effective_trials` and `cross_trial_sharpe_std`.
+Deflating twelve near-variants as twelve independent trials overstates the
+search; counting clusters restores the assumption the benchmark formula
+actually makes. The clustering is deterministic and conservative: no measured
+structure means every column counts as its own trial, and a matrix too small
+to measure (fewer than 100 complete rows, or no more rows than columns) falls
+back to the published raw-count deflation.
+
+**The trust model cuts both ways.** No statistic can see trials that are not
+in evidence: submit only the winner of a big search plus near-copies of it and
+the copies collapse to one effective trial — no deflation, and the DSR is the
+winner's undeflated PSR, which can pass every gate. The verdict reasons say so
+explicitly whenever the measurement collapses to one trial or the measured
+dispersion is near zero. If the matrix holds only a subset of what you tried,
+pass `n_trials` with the true search size: an explicit count always uses the
+published raw-count deflation. Honest inputs are the price of measured
+deflation.
 
 ## CLI
 
@@ -181,15 +211,17 @@ Verdict: NOT_DEPLOYABLE (deployable=False)
 
 === 3) A cautionary tale: 50 noise configurations ===
 Verdict: PROBABLY_OVERFIT (deployable=False)
-  Deflated Sharpe : 0.519 (probability the edge is real after deflation)
+  Deflated Sharpe : 0.411 (probability the edge is real after deflation)
   Annualised Sharpe: 1.355
   PBO             : 0.495
   Trials assumed  : 50
-  MinTRL          : 914221 obs needed; have 750 (short 913471 obs ~ 3624.9 years)
+  Effective trials: 50 (correlation clusters among the configurations)
+  MinTRL          : unreachable (fail-closed: no finite track record length reaches the significance bar)
   MinBTL          : 2.8 years needed for 50 trials; have 3.0
   Reasons:
-    - Deflated Sharpe 0.519 < 0.95: the Sharpe is not significant after deflating for trials and non-normality.
-    - Evidence gap: 914221 observations are needed at the observed moments to reach the 0.95 bar; the record has 750 - short about 913471 observations (~3624.9 years).
+    - Matrix-faithful deflation: the DSR benchmark is measured from the trials matrix - cross-trial Sharpe dispersion 0.0411 per period across 50 effective trials (correlation clusters among the 50 configurations) - per Lopez de Prado & Lewis (2019).
+    - Deflated Sharpe 0.411 < 0.95: the Sharpe is not significant after deflating for trials and non-normality.
+    - Evidence gap: no track record length reaches the 0.95 bar at the observed moments (the observed Sharpe does not exceed the deflation benchmark).
 ```
 
 Scene 2 is the evidence-gap report doing its job: the same edge that is
@@ -200,10 +232,12 @@ observed Sharpes need enormous track records -- that is the closed-form MinTRL
 arithmetic, not an opinion.
 
 Scene 3 still shows a healthy-looking annualised Sharpe of 1.36, but a deflated
-Sharpe near a coin flip and a PBO near 0.5 -- exactly the signature of
-overfitting. Its MinTRL makes the evidence gap concrete: at these moments, a
-best-of-50 selection would need thousands of years of data before this Sharpe
-became significant.
+Sharpe well under a coin flip and a PBO near 0.5 -- exactly the signature of
+overfitting. The deflation benchmark here is *measured* from the matrix (50
+effective trials, since independent noise has no correlation structure to
+collapse), and it exceeds the selected Sharpe outright: no track record length
+would ever certify the best of this search, and the verdict says so instead of
+quoting an astronomical MinTRL.
 
 ## Thresholds are policy, not law
 
@@ -216,14 +250,17 @@ sensible, demanding *policy* — not published constants. Tune them via the
 Faithful to the source papers: per-period (non-annualised) Sharpe inside PSR/DSR;
 *non-excess* kurtosis (a normal sample is 3); biased Fisher–Pearson skew; the
 Euler–Mascheroni constant in the expected-maximum-Sharpe benchmark; natural-log
-logits and `rank / (N + 1)` in CSCV; **positional** (bar-count) purging so a
+logits and `rank / (N + 1)` in CSCV; effective trials as correlation clusters on
+the López de Prado–Lewis distance `sqrt((1 - ρ) / 2)` (deterministic
+average-linkage in place of the paper's randomised k-means, deviations
+documented in the docstrings); **positional** (bar-count) purging so a
 business-day index is handled correctly. Degenerate inputs **fail closed**:
 probabilities return 0, and required-evidence statistics (MinTRL/MinBTL) return
 infinity.
 
 ## Machine-checked invariants
 
-The suite is 116 tests. Most anchor on hand-computed values from the source
+The suite is 157 tests. Most anchor on hand-computed values from the source
 papers; on top of those, a property-based layer
 ([`tests/test_properties.py`](tests/test_properties.py), Hypothesis as a
 dev-only dependency) machine-checks the mathematical contract on arbitrary
@@ -236,6 +273,11 @@ the statistics are contracted to drop non-finite observations:
   deflation can only ever lower a probability.
 - PBO is invariant under column permutation of the candidate matrix (CSCV must
   not care which order the configurations were tried in).
+- `cluster_trials` always returns a partition of the usable columns; the
+  effective-trial count is bounded by the column count; the matrix-faithful
+  DSR never exceeds the undeflated PSR of the selected column; both the count
+  and the DSR are invariant under column permutation -- exercised on matrices
+  both long enough to measure and short enough to fail closed.
 - The purged, embargoed walk-forward splitter never leaves a training index
   within `label_horizon` of the evaluation window, for arbitrary valid window
   parameters.
