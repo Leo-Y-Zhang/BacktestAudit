@@ -635,3 +635,38 @@ def test_dsr_from_trials_explicit_selected_series() -> None:
     assert deflated_sharpe_ratio_from_trials(perf, selected=other) == pytest.approx(
         probabilistic_sharpe_ratio(other, benchmark), rel=1e-12
     )
+
+
+def test_pbo_ignores_a_period_that_is_not_fully_observed() -> None:
+    """One blank CSV cell must not decide which configuration was IS-best.
+
+    Every other statistic here drops non-finite entries, and Verdict documents
+    it: "non-finite rows -- e.g. blank CSV cells -- are not evidence and are not
+    counted". PBO did not. A NaN makes that column's summed IS performance NaN,
+    np.argmax treats NaN as the maximum, and the NaN column is then selected as
+    the in-sample BEST in every partition. Measured before the fix on this exact
+    matrix: PBO moved from 0.000 to 0.423 and argmax picked column 3 rather than
+    the genuine winner in column 0.
+    """
+    rng = np.random.default_rng(11)
+    perf = rng.normal(0.0, 0.01, (200, 6))
+    perf[:, 0] += 0.002  # column 0 is the real winner
+
+    holed = perf.copy()
+    holed[37, 3] = np.nan  # one blank cell in a mediocre column
+
+    clean = probability_of_backtest_overfitting(perf)
+    with_gap = probability_of_backtest_overfitting(holed)
+    without_that_period = probability_of_backtest_overfitting(np.delete(perf, 37, axis=0))
+
+    assert with_gap == pytest.approx(without_that_period)
+    assert with_gap == pytest.approx(clean, abs=1e-9)
+
+
+def test_pbo_still_fails_closed_when_a_whole_column_is_blank() -> None:
+    """Dropping incomplete periods must not quietly rescue an unrankable input."""
+    rng = np.random.default_rng(11)
+    perf = rng.normal(0.0, 0.01, (200, 6))
+    perf[:, 3] = np.nan  # nothing is fully observed any more
+
+    assert probability_of_backtest_overfitting(perf, degenerate_value=1.0) == 1.0

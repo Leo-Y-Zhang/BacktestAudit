@@ -905,7 +905,24 @@ def probability_of_backtest_overfitting(
         Estimated PBO in ``[0, 1]`` (or ``degenerate_value``).
     """
     M: FloatArray = np.asarray(performance, dtype=np.float64)
-    if M.ndim != 2 or M.shape[1] < 2 or M.shape[0] < _MIN_OBS:
+    if M.ndim != 2 or M.shape[1] < 2:
+        return float(degenerate_value)
+    # Drop periods that are not fully observed. That is what every other
+    # statistic in this module does, and what Verdict documents in so many words:
+    # "non-finite rows -- e.g. blank CSV cells -- are not evidence and are not
+    # counted". This function did not, and one blank cell was enough to break it.
+    # That column's summed IS performance becomes NaN, np.argmax treats NaN as
+    # the maximum, so the NaN column is selected as the in-sample BEST in every
+    # partition. Measured on a 200x6 matrix whose column 0 is the genuine winner,
+    # a single blank cell in a mediocre column moved PBO from 0.000 to 0.423 and
+    # made argmax pick that column instead of the real one. The gate does not
+    # become more permissive -- a NaN pushes PBO up, never down -- but the number
+    # stops describing the search it claims to describe, and a user with one gap
+    # in a CSV is handed a measurement of nothing.
+    finite_rows = np.isfinite(M).all(axis=1)
+    if not bool(finite_rows.all()):
+        M = M[finite_rows, :]
+    if M.shape[0] < _MIN_OBS:
         return float(degenerate_value)
     T, N = int(M.shape[0]), int(M.shape[1])
 
