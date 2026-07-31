@@ -335,9 +335,20 @@ def evaluate(
 
     oos_sharpe: float | None = None
     oos_ic: float | None = None
+    # Supplying predictions and targets IS the request to be judged out of
+    # sample. When no fold survives purging, _walk_forward_oos returns None, and
+    # this block used to be skipped in silence: `strategy` stayed the IN-SAMPLE
+    # series and every statistic below - Sharpe, PSR, the deflated Sharpe, the
+    # gate - was computed on it. A caller who asked to be judged out of sample
+    # was judged in sample instead, and could be told DEPLOYABLE with nothing in
+    # the output saying so. For a tool whose entire purpose is refusing
+    # overfitted strategies, silently falling back to the overfitted basis is
+    # the one failure it must not have.
+    oos_unavailable = False
     if predictions is not None and targets is not None:
         spl = splitter or default_walk_forward_splitter(len(np.asarray(targets).ravel()))
         oos = _walk_forward_oos(predictions, targets, spl)
+        oos_unavailable = oos is None
         if oos is not None:
             strategy = oos.returns  # the OOS series is the honest basis for gating
             oos_sharpe = annualized_sharpe(strategy, periods_per_year)
@@ -391,6 +402,19 @@ def evaluate(
 
     reasons: list[str] = []
     fail = False
+
+    if oos_unavailable:
+        # Default-deny: the requested basis could not be produced, so there is no
+        # honest verdict to give. Refuse rather than answer a different question.
+        fail = True
+        reasons.append(
+            "Out-of-sample gating was requested (predictions and targets were "
+            "supplied) but the purged walk-forward produced no usable fold, so "
+            "there is no out-of-sample series to judge. NOT deployable on that "
+            "basis alone: every figure below is measured on the IN-SAMPLE series "
+            "and is not evidence about held-out performance. Supply more "
+            "observations, or a splitter with a shorter embargo or fewer folds."
+        )
 
     if matrix_deflation is not None:
         if matrix_deflation.cross_trial_std is None:

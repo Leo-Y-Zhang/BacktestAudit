@@ -516,3 +516,56 @@ def test_matrix_faithful_dsr_iid_noise_pin_validates_the_null_approximation() ->
     assert verdict.deflated_sharpe == pytest.approx(0.426080, abs=1e-6)
     assert abs(verdict.deflated_sharpe - old) < 0.02
     assert verdict.classification == "PROBABLY_OVERFIT"
+
+
+def test_no_surviving_fold_refuses_instead_of_gating_in_sample() -> None:
+    """Supplying predictions and targets IS the request to be judged out of sample.
+
+    When purging leaves no usable fold, _walk_forward_oos returns None and the
+    OOS block is skipped, so `strategy` stays the IN-SAMPLE series and every
+    statistic - Sharpe, PSR, the deflated Sharpe, the gate - is computed on it.
+    Measured before the guard: a 60-bar record with a 30-bar label horizon (an
+    ordinary setting for a 30-bar-ahead prediction) returned DEPLOYABLE on an
+    in-sample Sharpe of 12.11, with nothing in `reasons` saying the out-of-sample
+    basis was missing. A tool that exists to refuse overfitted strategies must
+    not quietly answer using the overfitted basis.
+    """
+    from lyravalidate.crossval import PurgedWalkForwardSplitter
+
+    rng = np.random.default_rng(4)
+    n = 60
+    targets = rng.normal(0.0, 0.01, n)
+    predictions = targets + rng.normal(0.0, 0.001, n)  # near-perfect in sample
+    returns = predictions * targets
+
+    splitter = PurgedWalkForwardSplitter(
+        train_size=20, valid_size=5, test_size=5, embargo_size=2, label_horizon=30
+    )
+    verdict = evaluate(
+        returns, predictions=predictions, targets=targets, n_trials=1, splitter=splitter
+    )
+
+    assert not verdict.deployable
+    assert verdict.classification == "NOT_DEPLOYABLE"
+    assert any("no usable fold" in r for r in verdict.reasons), verdict.reasons
+    # and it must say the numbers shown are in-sample, not quietly imply otherwise
+    assert any("IN-SAMPLE" in r for r in verdict.reasons)
+
+
+def test_a_surviving_fold_still_gates_out_of_sample() -> None:
+    """Liveness half: the guard must not refuse a run that DOES have folds."""
+    from lyravalidate.crossval import PurgedWalkForwardSplitter
+
+    rng = np.random.default_rng(4)
+    n = 60
+    targets = rng.normal(0.0, 0.01, n)
+    predictions = targets + rng.normal(0.0, 0.001, n)
+    returns = predictions * targets
+
+    splitter = PurgedWalkForwardSplitter(
+        train_size=20, valid_size=5, test_size=5, embargo_size=2, label_horizon=1
+    )
+    verdict = evaluate(
+        returns, predictions=predictions, targets=targets, n_trials=1, splitter=splitter
+    )
+    assert not any("no usable fold" in r for r in verdict.reasons)
