@@ -454,9 +454,40 @@ def minimum_backtest_length(sharpe: float, n_trials: int) -> float:
 # family-plus-independents shape probed.
 _NO_STRUCTURE_SILHOUETTE = 0.25
 
-# Correlation distances at or below this are duplicates for clustering purposes
-# (sample correlation of exact copies is 1 up to float rounding).
-_DUPLICATE_TRIAL_DISTANCE = 1e-6
+# Correlation distances at or below this are duplicates for clustering
+# purposes. The bound is the distance of pairwise correlation 0.999,
+# d = sqrt((1 - 0.999) / 2): columns sharing 99.9% of their correlation are
+# re-parameterisations of one strategy, not distinct trials -- and on that
+# scale the *relative* differences between distances are estimation noise, so
+# letting the silhouette search "find structure" in them would manufacture
+# trials out of float dust. (Sample correlation of exact copies is 1 only up
+# to rounding, so an exact-equality test would miss near-copies entirely.)
+_DUPLICATE_TRIAL_DISTANCE = math.sqrt((1.0 - 0.999) / 2.0)
+
+# When the best k >= 2 partition shows no substantial structure (pooled mean
+# silhouette at or below the Kaufman & Rousseeuw bound), the matrix is either
+# mutually independent trials (split into singletons -- conservative) or one
+# homogeneous correlated family (one cluster). The two are distinguished by
+# the mean pairwise correlation: at or above this bound the columns are one
+# family. 0.7 matches the calibrated region in which planted families are
+# reliably recovered against independents (see the calibration note above);
+# a homogeneous blob at mean correlation below 0.7 stays split into
+# singletons -- the conservative direction, mirroring the "weak structure"
+# band documented in :func:`cluster_trials`.
+_HOMOGENEOUS_MEAN_CORRELATION = 0.7
+
+# Measured clustering needs enough rows to trust the sample correlation
+# matrix. On short records the silhouette search invents families on iid
+# noise (measured 2026-07-31 on the unguarded algorithm, 20 seeds per length,
+# N=10: T=8 recovered the true count 6/20, T=20 18/20, T=40 19/20, with clean
+# recovery from T=60 in these probes), which *under*-counts the effective
+# trials and weakens the deflation -- the fail-open direction. The floor is
+# set at 100, the shortest length covered by the calibration runs, not at the
+# last observed failure; complete rows must also exceed the column count,
+# else the sample correlation matrix is rank-deficient and structure is
+# guaranteed spurious. Shorter or wider matrices are "not measurable":
+# callers fall back to the published raw-count deflation (fail-closed).
+_MIN_CLUSTER_OBS = 100
 
 
 def _prepared_trials(trials: npt.ArrayLike) -> tuple[FloatArray, list[int]] | None:
@@ -467,8 +498,11 @@ def _prepared_trials(trials: npt.ArrayLike) -> tuple[FloatArray, list[int]] | No
     the library-wide contract) and ``usable`` maps its columns back to the
     original column indices. A column is usable when its own finite
     observations yield valid Sharpe moments and it is not constant on the
-    complete-case rows. ``None`` when fewer than two usable columns or fewer
-    than four complete rows remain.
+    complete-case rows. ``None`` when fewer than two usable columns remain,
+    or when the complete-case rows are too few to trust a measured
+    correlation structure (fewer than ``_MIN_CLUSTER_OBS``, or not more than
+    the number of usable columns -- a rank-deficient sample correlation
+    matrix guarantees spurious structure).
     """
     M: FloatArray = np.asarray(trials, dtype=np.float64)
     if M.ndim != 2 or M.shape[1] < 2:
@@ -478,7 +512,7 @@ def _prepared_trials(trials: npt.ArrayLike) -> tuple[FloatArray, list[int]] | No
         return None
     sub: FloatArray = M[:, usable]
     sub = sub[np.all(np.isfinite(sub), axis=1)]
-    if sub.shape[0] < _MIN_OBS:
+    if sub.shape[0] < _MIN_CLUSTER_OBS:
         return None
     keep = np.std(sub, axis=0, ddof=1) > 0.0
     if int(np.count_nonzero(keep)) < 2:
@@ -486,6 +520,8 @@ def _prepared_trials(trials: npt.ArrayLike) -> tuple[FloatArray, list[int]] | No
     if not bool(np.all(keep)):
         usable = [j for j, kept in zip(usable, keep, strict=True) if kept]
         sub = sub[:, keep]
+    if sub.shape[0] <= len(usable):
+        return None
     return np.ascontiguousarray(sub), usable
 
 
@@ -493,21 +529,35 @@ def _silhouette_scores(D: FloatArray, labels: npt.NDArray[np.int_]) -> FloatArra
     """Silhouette scores (Rousseeuw, 1987) from a precomputed distance matrix.
 
     Singleton clusters score 0 by convention, as does a point whose within- and
-    between-cluster mean distances are both 0.
+    between-cluster mean distances are both 0. Vectorised (one ``D @ onehot``
+    matrix product instead of a Python loop over points), because the partition
+    search evaluates this for every candidate ``k``: the loop form cost 13.9 s
+    for one ``effective_trials`` call at ``N = 200`` (T = 500, measured
+    2026-07-31 against 0.3 s vectorised) and grew roughly cubically in the
+    column count.
     """
     n = int(labels.size)
+    _uniq, inverse = np.unique(labels, return_inverse=True)
+    k = int(_uniq.size)
+    if k < 2:
+        return np.zeros(n, dtype=np.float64)  # one cluster: no "between" exists
+    onehot: FloatArray = np.zeros((n, k), dtype=np.float64)
+    onehot[np.arange(n), inverse] = 1.0
+    counts: FloatArray = onehot.sum(axis=0)  # cluster sizes, all >= 1
+    # (n, k): summed distance from point i to the members of cluster c.
+    sums: FloatArray = np.asarray(D @ onehot, dtype=np.float64)
+    own = counts[inverse]  # own-cluster size per point
+    own_sums = sums[np.arange(n), inverse]
+    # a_i: mean distance to own cluster (D[i, i] == 0 so divide by size - 1).
+    a: FloatArray = np.divide(own_sums, np.maximum(own - 1.0, 1.0))
+    # b_i: smallest mean distance to any *other* cluster.
+    means: FloatArray = np.asarray(sums / counts, dtype=np.float64)
+    means[np.arange(n), inverse] = np.inf
+    b: FloatArray = means.min(axis=1)
+    denom: FloatArray = np.maximum(a, b)
     scores: FloatArray = np.zeros(n, dtype=np.float64)
-    unique = np.unique(labels)
-    for i in range(n):
-        same = labels == labels[i]
-        n_same = int(np.count_nonzero(same))
-        if n_same <= 1:
-            continue
-        a = float(np.sum(D[i, same]) / (n_same - 1))  # D[i, i] == 0
-        b = min(float(np.mean(D[i, labels == other])) for other in unique if other != labels[i])
-        denom = max(a, b)
-        if denom > 0.0:
-            scores[i] = (b - a) / denom
+    valid = (own > 1.0) & (denom > 0.0)
+    scores[valid] = (b[valid] - a[valid]) / denom[valid]
     return scores
 
 
@@ -558,31 +608,45 @@ def cluster_trials(trials: npt.ArrayLike) -> list[list[int]]:
     them. Correlations are taken over complete-case rows (non-finite rows are
     dropped; they are not evidence) among the usable columns.
 
-    Three outcomes, in decreasing order of measured structure:
+    Four outcomes, in decreasing order of measured structure:
 
     * genuine correlation families -> one cluster per family. Every
       multi-member cluster must itself clear the Kaufman & Rousseeuw
       cohesion bound (see below), so a diffuse "everything else" cluster of
       mutually uncorrelated columns is split back into singletons rather
       than counted as one trial;
-    * all columns effectively identical (every pairwise correlation ~1) ->
-      a single cluster: the "search" only ever tried one distinct thing;
-    * no accepted structure (mean silhouette at or below the Kaufman &
-      Rousseeuw 0.25 bound) -> every usable column is its own singleton
-      cluster: the trials are effectively independent. This is the
-      conservative direction -- fewer clusters would weaken the deflation.
+    * all columns effectively identical (every pairwise correlation at or
+      above 0.999) -> a single cluster: the "search" only ever tried one
+      distinct thing, and near-copies are copies for trial-counting purposes;
+    * one homogeneous family (the best partition shows no substantial
+      structure -- pooled mean silhouette at or below the Kaufman & Rousseeuw
+      0.25 bound -- yet the mean pairwise correlation is at least 0.7) -> a
+      single cluster: a parameter sweep around one idea is one trial, however
+      many configurations it produced;
+    * no accepted structure and no homogeneity -> every usable column is its
+      own singleton cluster: the trials are effectively independent. This is
+      the conservative direction -- fewer clusters would weaken the deflation.
 
-    Weakly correlated families sit near the bound by construction (Kaufman &
+    Weakly correlated families sit near the bounds by construction (Kaufman &
     Rousseeuw call 0.26-0.50 "weak" structure), so families around pairwise
     correlation 0.5 may be counted as separate trials -- again the
-    conservative direction, never the optimistic one.
+    conservative direction, never the optimistic one. Measured on planted
+    single families (10 seeds per rho, T = 500, N = 12, 2026-07-31): one
+    cluster 10/10 at pairwise rho 0.8, 0.9 and 0.95, while rho <= 0.6 split
+    into singletons 10/10 (conservative); rho 0.7 sits exactly on the
+    homogeneity bound and collapsed 6/10 (split 4/10, the conservative side
+    of a sampling coin-flip).
 
     Returns
     -------
     list[list[int]]
         Clusters as sorted lists of *original* column indices, ordered by
-        first member. Empty list when the matrix is unusable (not 2-D, fewer
-        than two usable columns, or fewer than four complete rows).
+        first member. Empty list when the matrix is unusable or too small to
+        measure (not 2-D, fewer than two usable columns, fewer than 100
+        complete rows, or no more complete rows than usable columns -- short
+        records let the silhouette search invent families on independent
+        noise, the fail-open direction, so they fail closed to "not
+        measurable" and callers fall back to the raw trial count).
     """
     prepared = _prepared_trials(trials)
     if prepared is None:
@@ -598,6 +662,21 @@ def cluster_trials(trials: npt.ArrayLike) -> list[list[int]]:
     labels = _best_partition(D)
     if labels is None:
         return [[j] for j in usable]
+    scores = _silhouette_scores(D, labels)
+    # k = 1 is unreachable by the partition search (a silhouette needs two
+    # clusters), so the all-one-family outcome is decided here: when even the
+    # best k >= 2 partition shows no substantial structure (pooled mean
+    # silhouette at or below the Kaufman & Rousseeuw bound) the matrix is
+    # either mutually independent trials or one homogeneous blob that the
+    # forced split sliced arbitrarily. The mean pairwise correlation tells
+    # them apart: a homogeneous correlated family collapses to one cluster,
+    # anything else falls through and is split into singletons below.
+    off_diagonal = corr[~np.eye(corr.shape[0], dtype=bool)]
+    if (
+        float(np.mean(scores)) <= _NO_STRUCTURE_SILHOUETTE
+        and float(np.mean(off_diagonal)) >= _HOMOGENEOUS_MEAN_CORRELATION
+    ):
+        return [list(usable)]
     # Per-cluster cohesion check -- the deterministic counterpart of the ONC
     # recursive redo of low-quality clusters: a multi-member cluster only
     # counts as one trial family when its own mean silhouette clears the same
@@ -606,7 +685,6 @@ def cluster_trials(trials: npt.ArrayLike) -> list[list[int]]:
     # undercounting the effective trials and weakening the deflation (the
     # fail-open direction). Splitting an uncohesive cluster into singletons
     # raises the trial count instead -- conservative.
-    scores = _silhouette_scores(D, labels)
     grouped: dict[int, list[int]] = {}
     for position, label in enumerate(labels):
         grouped.setdefault(int(label), []).append(position)
@@ -637,8 +715,10 @@ def effective_trials(trials: npt.ArrayLike) -> int:
     -------
     int
         Number of clusters, in ``[1, N]``; ``0`` (a "not measurable" sentinel,
-        never a trial count) when the matrix is unusable -- callers must then
-        fall back to a trial count they can defend, e.g. the raw column count.
+        never a trial count) when the matrix is unusable or has too few
+        complete rows for a trustworthy correlation structure (see
+        :func:`cluster_trials`) -- callers must then fall back to a trial
+        count they can defend, e.g. the raw column count.
     """
     return len(cluster_trials(trials))
 
@@ -666,7 +746,11 @@ def cross_trial_sharpe_std(
         Cluster assignment as lists of column indices (e.g. from
         :func:`cluster_trials`). Computed from ``trials`` when omitted. A
         degenerate aggregate (e.g. members that cancel) contributes a Sharpe
-        of ``0.0``, per :func:`sharpe_ratio`.
+        of ``0.0``, per :func:`sharpe_ratio`. A supplied assignment must be a
+        partition-like list: every member a valid column index in
+        ``[0, N)``, no empty clusters, no column in two clusters
+        (``ValueError`` otherwise -- a negative index would silently wrap to
+        the wrong column and a duplicate would double-count it).
 
     Returns
     -------
@@ -674,6 +758,12 @@ def cross_trial_sharpe_std(
         Standard deviation of the per-period cluster Sharpes; ``inf``
         (fail-closed: no information) when fewer than two clusters exist --
         returning ``0.0`` would erase the deflation benchmark entirely.
+
+    Raises
+    ------
+    ValueError
+        If a supplied ``clusters`` assignment is malformed (out-of-range or
+        negative index, empty cluster, or overlapping clusters).
 
     Honesty note
     ------------
@@ -689,6 +779,19 @@ def cross_trial_sharpe_std(
         return float("inf")
     if clusters is None:
         clusters = cluster_trials(M)
+    else:
+        seen: set[int] = set()
+        for members in clusters:
+            if not members:
+                raise ValueError("clusters must not contain an empty cluster")
+            for j in members:
+                if not 0 <= j < M.shape[1]:
+                    raise ValueError(
+                        f"cluster member {j} is not a valid column index in [0, {M.shape[1]})"
+                    )
+                if j in seen:
+                    raise ValueError(f"column {j} appears in more than one cluster")
+                seen.add(j)
     if len(clusters) < 2:
         return float("inf")
     sharpes = [sharpe_ratio(np.sum(M[:, list(members)], axis=1)) for members in clusters]

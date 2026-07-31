@@ -190,6 +190,23 @@ def test_cli_trials_alias(tmp_path: Path) -> None:
     assert main([str(csv), "--trials", "1"]) == 0
 
 
+@pytest.mark.parametrize("bad", ["0", "-5", "two"])
+def test_cli_rejects_non_positive_trials(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], bad: str
+) -> None:
+    """--trials 0 (or a negative typo) used to be silently floored to 1, which
+    both disabled the deflation and switched off the matrix measurement; it is
+    a usage error now (argparse exits 2, never a verdict exit code)."""
+    rng = np.random.default_rng(4)
+    returns = 0.0008 + 0.008 * rng.standard_normal(200)
+    csv = tmp_path / "good.csv"
+    _write_returns(csv, returns.reshape(-1, 1), ["strategy"])
+    with pytest.raises(SystemExit) as excinfo:
+        main([str(csv), "--trials", bad])
+    assert excinfo.value.code == 2
+    assert "--trials" in capsys.readouterr().err
+
+
 def test_cli_on_packaged_sample(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert _SAMPLE_CSV.exists(), "examples/sample_returns.csv should ship with the package"
     report = tmp_path / "sample.html"

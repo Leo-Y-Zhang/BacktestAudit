@@ -544,6 +544,86 @@ def test_dsr_from_trials_fail_closed() -> None:
     assert deflated_sharpe_ratio_from_trials(np.ones(10)) == 0.0
 
 
+def _single_family(rho: float, n: int = 12, T: int = 500, seed: int = 0) -> np.ndarray:
+    """One correlated family: every column shares a factor at pairwise ~``rho``."""
+    rng = np.random.default_rng(seed)
+    w = math.sqrt(rho)
+    base = rng.standard_normal(T)
+    return np.column_stack(
+        [0.01 * (w * base + math.sqrt(1.0 - rho) * rng.standard_normal(T)) for _ in range(n)]
+    )
+
+
+def test_cluster_trials_single_family_is_one_cluster() -> None:
+    # The docstring contract: a parameter sweep around ONE idea is ONE trial.
+    # k=1 is unreachable by the silhouette search, so this exercises the
+    # homogeneity escape (no structure found + high mean pairwise correlation).
+    for seed in (0, 1, 2):
+        perf = _single_family(0.9, seed=seed)
+        assert cluster_trials(perf) == [list(range(12))]
+        assert effective_trials(perf) == 1
+    assert effective_trials(_single_family(0.8, seed=3)) == 1
+
+
+def test_cluster_trials_near_duplicates_are_one_trial() -> None:
+    # Near-copies (winner + tiny noise, pairwise rho ~0.9999) are copies for
+    # trial-counting purposes: sample correlation of exact copies is 1 only up
+    # to float rounding, so an exact-equality duplicate test would miss them
+    # and the forced k >= 2 split would report 12 trials where there is one.
+    rng = np.random.default_rng(1)
+    winner = 0.001 + 0.01 * rng.standard_normal(400)
+    for scale in (1e-7, 1e-4):
+        dupes = np.column_stack(
+            [winner] + [winner + scale * rng.standard_normal(400) for _ in range(11)]
+        )
+        assert effective_trials(dupes) == 1
+
+
+def test_cluster_trials_weak_single_family_stays_split() -> None:
+    # Below the homogeneity bound (mean pairwise rho < 0.7) a structureless
+    # matrix splits into singletons -- the conservative direction: more trials
+    # mean stronger deflation, never weaker.
+    assert effective_trials(_single_family(0.5, seed=4)) == 12
+
+
+def test_cluster_trials_short_records_are_not_measurable() -> None:
+    # Below 100 complete rows the silhouette search invents families on iid
+    # noise (undercounting trials weakens the deflation -- fail-open), so
+    # short matrices fail closed to "not measurable" and callers fall back to
+    # the raw trial count. At the 100-row floor the count is trusted again.
+    rng = np.random.default_rng(2024)
+    noise = 0.01 * rng.standard_normal((100, 10))
+    assert cluster_trials(noise[:60]) == []
+    assert effective_trials(noise[:60]) == 0
+    assert effective_trials(noise[:99]) == 0
+    assert effective_trials(noise) == 10
+
+
+def test_cluster_trials_needs_more_rows_than_columns() -> None:
+    # With complete rows <= columns the sample correlation matrix is rank
+    # deficient and "structure" is guaranteed spurious: not measurable.
+    rng = np.random.default_rng(0)
+    wide = 0.01 * rng.standard_normal((120, 150))
+    assert cluster_trials(wide) == []
+    assert effective_trials(wide) == 0
+
+
+def test_cross_trial_sharpe_std_rejects_malformed_clusters() -> None:
+    # A supplied assignment must be partition-like: bad indices would silently
+    # wrap (negative) or double-count columns (overlap) under numpy indexing.
+    a = np.array([0.01, 0.02, 0.03, 0.04])
+    b = np.array([-0.01, 0.02, 0.05, 0.01])
+    perf = np.column_stack([a, b])
+    with pytest.raises(ValueError, match="valid column index"):
+        cross_trial_sharpe_std(perf, clusters=[[0], [-1]])
+    with pytest.raises(ValueError, match="valid column index"):
+        cross_trial_sharpe_std(perf, clusters=[[0], [2]])
+    with pytest.raises(ValueError, match="empty cluster"):
+        cross_trial_sharpe_std(perf, clusters=[[0], []])
+    with pytest.raises(ValueError, match="more than one cluster"):
+        cross_trial_sharpe_std(perf, clusters=[[0, 1], [1]])
+
+
 def test_dsr_from_trials_explicit_selected_series() -> None:
     # An explicit `selected` series is judged against the matrix's benchmark.
     perf = _planted_trials(0.7, seed=23)

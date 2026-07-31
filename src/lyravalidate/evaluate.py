@@ -42,6 +42,16 @@ __all__ = ["Thresholds", "Verdict", "evaluate"]
 
 Classification = Literal["DEPLOYABLE", "NOT_DEPLOYABLE", "PROBABLY_OVERFIT"]
 
+# Matrix-measured cross-trial Sharpe dispersion below this fraction of the
+# selected series' own Sharpe estimator noise triggers a trust-model caveat in
+# the reasons. Rationale: under the null of genuinely independent trials the
+# cross-trial dispersion approximately equals the per-trial estimator noise
+# (that equality is exactly the approximation the published raw-count DSR
+# makes), so a measured dispersion under half that level says the supposedly
+# distinct trials are statistically closer than independent re-estimates of
+# one strategy -- a search of near-variants, which earns almost no deflation.
+_NEAR_ZERO_DISPERSION_FRACTION = 0.5
+
 
 @dataclass(frozen=True)
 class Thresholds:
@@ -226,8 +236,11 @@ def _resolve_strategy(
     and the per-trial dispersion is the cross-trial Sharpe standard deviation.
     An explicit ``n_trials`` asserts a search larger than (or different from)
     the matrix, so the published raw-count approximation is kept for it. When
-    the cross-section is unusable the published approximation is the fallback
-    (fail-closed: the assumed search is never weakened by a failed measurement).
+    the cross-section is unusable or too short to measure (fewer than 100
+    complete rows, or no more rows than columns -- see
+    :func:`lyravalidate.stats.cluster_trials`) the published approximation is
+    the fallback (fail-closed: the assumed search is never weakened by a
+    failed or untrustworthy measurement).
     """
     arr: npt.NDArray[np.float64] = np.asarray(returns, dtype=np.float64)
     if arr.ndim == 1:
@@ -383,8 +396,12 @@ def evaluate(
         if matrix_deflation.cross_trial_std is None:
             reasons.append(
                 f"Matrix-faithful deflation: the {n_trials_eff} supplied configurations "
-                "are effectively one trial (all columns are near-duplicates), so no "
-                "selection deflation applies (Lopez de Prado & Lewis, 2019)."
+                "are effectively one trial (every column is a near-duplicate or "
+                "correlated variant of the others), so no selection deflation applies "
+                "(Lopez de Prado & Lewis, 2019). The matrix is trusted as the WHOLE "
+                "search: if these columns are only the winner plus variants from a "
+                "larger search, this measurement cannot see that - pass n_trials with "
+                "the true number of configurations tried."
             )
         else:
             reasons.append(
@@ -395,6 +412,28 @@ def evaluate(
                 f"clusters among the {n_trials_eff} configurations) - per Lopez de "
                 "Prado & Lewis (2019)."
             )
+            # Near-zero measured dispersion: under the null of genuinely
+            # independent trials the cross-trial Sharpe dispersion is
+            # approximately the Sharpe estimator noise of a single trial, so a
+            # measured dispersion well below that level means the surviving
+            # clusters are nearly interchangeable (or the few-cluster estimate
+            # is noisy) and the measured deflation is weak. Say so: the matrix
+            # is trusted as the whole search, and this is where that trust is
+            # cheapest to abuse (submit the winner plus variants only).
+            if (
+                math.isfinite(sigma_sr)
+                and matrix_deflation.cross_trial_std
+                < _NEAR_ZERO_DISPERSION_FRACTION * sigma_sr
+            ):
+                reasons.append(
+                    "Caveat: the measured cross-trial dispersion "
+                    f"({matrix_deflation.cross_trial_std:.3g} per period) is well below "
+                    f"the selected series' own Sharpe estimator noise ({sigma_sr:.3g}), "
+                    "so the supplied configurations are nearly interchangeable and the "
+                    "measured deflation is weak. The matrix is trusted as the WHOLE "
+                    "search - if it holds only a subset of what was tried, pass "
+                    "n_trials with the true search size."
+                )
 
     if dsr < thr.min_deflated_sharpe:
         fail = True

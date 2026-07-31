@@ -30,6 +30,23 @@ from .evaluate import Thresholds, Verdict, evaluate
 from .report import CITATIONS, DISCLAIMER, write_report
 
 
+def _positive_int(text: str) -> int:
+    """Argparse type for counts that must be >= 1.
+
+    ``--trials 0`` (or a negative typo) used to be accepted and silently
+    floored to 1 downstream, which both disabled the deflation and switched
+    off the matrix-measured benchmark (any explicit value routes to the
+    published raw-count path) -- an expensive typo, so it is rejected here.
+    """
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer (got {value})")
+    return value
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lyra-validate",
@@ -53,7 +70,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--trials",
         "--n-trials",
         dest="n_trials",
-        type=int,
+        type=_positive_int,
         default=None,
         metavar="N",
         help="Number of configurations tried during research (selection-bias count). "

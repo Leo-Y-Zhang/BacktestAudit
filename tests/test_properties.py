@@ -65,6 +65,21 @@ _candidate_matrix = hnp.arrays(
     elements=st.floats(min_value=-1.0, max_value=1.0, allow_nan=False, allow_infinity=False),
 )
 
+# Matrices long enough for *measured* clustering (>= 100 complete rows and more
+# rows than columns -- see stats._MIN_CLUSTER_OBS): shorter matrices fail
+# closed to "not measurable". The union keeps both regimes under test: the
+# invariants must hold whether the clustering ran or fell back.
+_trials_matrix = st.one_of(
+    _candidate_matrix,
+    hnp.arrays(
+        dtype=np.float64,
+        shape=st.tuples(
+            st.integers(min_value=100, max_value=140), st.integers(min_value=2, max_value=6)
+        ),
+        elements=st.floats(min_value=-1.0, max_value=1.0, allow_nan=False, allow_infinity=False),
+    ),
+)
+
 
 # ── probabilities stay probabilities ──────────────────────────────────────────
 
@@ -182,13 +197,13 @@ def test_walk_forward_never_leaks_into_eval_window(
 # ── effective trials / matrix-faithful deflation ──────────────────────────────
 
 
-@given(perf=_candidate_matrix)
+@given(perf=_trials_matrix)
 def test_effective_trials_bounded_by_column_count(perf: np.ndarray) -> None:
     K = effective_trials(perf)
     assert 0 <= K <= perf.shape[1]
 
 
-@given(perf=_candidate_matrix)
+@given(perf=_trials_matrix)
 def test_cluster_trials_is_a_partition_of_columns(perf: np.ndarray) -> None:
     clusters = cluster_trials(perf)
     members = [j for cluster in clusters for j in cluster]
@@ -197,13 +212,13 @@ def test_cluster_trials_is_a_partition_of_columns(perf: np.ndarray) -> None:
     assert all(cluster for cluster in clusters)  # never an empty cluster
 
 
-@given(perf=_candidate_matrix)
+@given(perf=_trials_matrix)
 def test_cross_trial_sharpe_std_is_non_negative(perf: np.ndarray) -> None:
     sigma = cross_trial_sharpe_std(perf)
     assert sigma >= 0.0  # inf (unmeasurable, fail-closed) satisfies this too
 
 
-@given(perf=_candidate_matrix)
+@given(perf=_trials_matrix)
 def test_matrix_faithful_dsr_is_a_probability_capped_by_psr(perf: np.ndarray) -> None:
     # The matrix-derived benchmark SR* is always >= 0, so the matrix-faithful
     # deflation can never *raise* the probability above the undeflated PSR.
@@ -217,7 +232,7 @@ def test_matrix_faithful_dsr_is_a_probability_capped_by_psr(perf: np.ndarray) ->
 @given(
     matrix_seed=st.integers(min_value=0, max_value=2**32 - 1),
     perm_seed=st.integers(min_value=0, max_value=2**32 - 1),
-    T=st.integers(min_value=8, max_value=48),
+    T=st.integers(min_value=100, max_value=150),
     N=st.integers(min_value=2, max_value=6),
 )
 def test_effective_trials_invariant_under_column_permutation(

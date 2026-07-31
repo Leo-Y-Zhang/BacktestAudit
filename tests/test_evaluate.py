@@ -355,6 +355,102 @@ def test_matrix_falls_back_to_published_when_cross_section_unusable() -> None:
     )
 
 
+def test_single_family_matrix_collapses_to_one_effective_trial() -> None:
+    """A parameter sweep around one idea (one correlated family, rho ~0.9) is
+    one trial: no selection deflation applies and the DSR equals the PSR of
+    the selected column. Regression for the k=1-unreachable defect, where the
+    homogeneous blob shattered into 12 singletons and the diagnostic reported
+    12 effective trials where the truth is 1."""
+    from lyravalidate.stats import probabilistic_sharpe_ratio, sharpe_ratio
+
+    rng = np.random.default_rng(0)
+    w = math.sqrt(0.9)
+    base = rng.standard_normal(500)
+    perf = np.column_stack(
+        [0.01 * (w * base + math.sqrt(0.1) * rng.standard_normal(500)) for _ in range(12)]
+    )
+    verdict = evaluate(perf)
+    assert verdict.effective_trials == 1
+    assert verdict.cross_trial_sharpe_std is None
+    best = int(np.argmax([sharpe_ratio(perf[:, j]) for j in range(12)]))
+    assert verdict.deflated_sharpe == pytest.approx(
+        probabilistic_sharpe_ratio(perf[:, best], 0.0), rel=1e-12
+    )
+
+
+def test_matrix_short_record_falls_back_to_published_deflation() -> None:
+    """Below 100 complete rows measured clustering is not trustworthy (it
+    invents families on iid noise, weakening the deflation), so the verdict
+    falls back to the published raw-count path -- fail-closed."""
+    from lyravalidate.stats import deflated_sharpe_ratio, sharpe_ratio
+
+    rng = np.random.default_rng(3)
+    short = 0.01 * rng.standard_normal((60, 10))
+    verdict = evaluate(short)
+    assert verdict.effective_trials is None
+    assert verdict.cross_trial_sharpe_std is None
+    best = int(np.argmax([sharpe_ratio(short[:, j]) for j in range(10)]))
+    assert verdict.deflated_sharpe == pytest.approx(
+        deflated_sharpe_ratio(short[:, best], 10), rel=1e-12
+    )
+
+
+def test_hidden_search_near_duplicates_pin_the_documented_trust_model() -> None:
+    """TRUST-MODEL PIN (documented limitation, not a defect being celebrated).
+
+    Take the best of a hidden 200-trial noise search and submit only that
+    winner plus 11 near-copies, with no n_trials. The matrix-faithful default
+    treats the matrix as the WHOLE search: the near-copies collapse to one
+    effective trial, no deflation applies, and the DSR equals the winner's
+    undeflated PSR -- which can clear every gate. That is faithful to Lopez
+    de Prado & Lewis (near-copies ARE one trial; the hidden search is simply
+    not in evidence), but it means the default CANNOT protect against a
+    search hidden outside the matrix. The protections are (a) the reason
+    string that says the matrix is trusted as the whole search and (b) the
+    explicit n_trials path, which restores the raw-count deflation and flips
+    the verdict here. Both are asserted so neither can silently regress.
+    """
+    from lyravalidate.stats import probabilistic_sharpe_ratio, sharpe_ratio
+
+    rng = np.random.default_rng(1)
+    hidden_search = 0.01 * rng.standard_normal((400, 200))
+    best = int(np.argmax([sharpe_ratio(hidden_search[:, j]) for j in range(200)]))
+    winner = hidden_search[:, best]
+    dupes = np.column_stack(
+        [winner] + [winner + 1e-4 * rng.standard_normal(400) for _ in range(11)]
+    )
+
+    laundered = evaluate(dupes)
+    assert laundered.effective_trials == 1
+    selected = int(np.argmax([sharpe_ratio(dupes[:, j]) for j in range(12)]))
+    assert laundered.deflated_sharpe == pytest.approx(
+        probabilistic_sharpe_ratio(dupes[:, selected], 0.0), rel=1e-12
+    )
+    assert laundered.deflated_sharpe > 0.95  # undeflated: the hidden search is invisible
+    assert any("trusted as the WHOLE search" in r for r in laundered.reasons)
+    assert any("pass n_trials" in r for r in laundered.reasons)
+
+    honest = evaluate(dupes, n_trials=200)  # the search size, admitted
+    assert honest.deflated_sharpe < 0.95
+    assert honest.deployable is False
+
+
+def test_near_zero_measured_dispersion_adds_trust_caveat() -> None:
+    """Two families of near-copies whose aggregates share the same Sharpe:
+    the measured cross-trial dispersion is far below the Sharpe estimator
+    noise, so the deflation is weak and the reasons must say so."""
+    rng = np.random.default_rng(5)
+    a = 0.001 + 0.01 * rng.standard_normal(500)
+    b = np.random.default_rng(6).permutation(a)  # identical Sharpe, uncorrelated
+    fam_a = np.column_stack([a + 1e-5 * rng.standard_normal(500) for _ in range(6)])
+    fam_b = np.column_stack([b + 1e-5 * rng.standard_normal(500) for _ in range(6)])
+    verdict = evaluate(np.hstack([fam_a, fam_b]))
+    assert verdict.effective_trials == 2
+    assert verdict.cross_trial_sharpe_std is not None
+    assert any(r.startswith("Caveat") for r in verdict.reasons)
+    assert any("nearly interchangeable" in r for r in verdict.reasons)
+
+
 def test_matrix_faithful_dsr_change_is_pinned_and_deliberate() -> None:
     """REGRESSION PIN for the deliberate numeric change on the matrix path.
 
@@ -370,12 +466,15 @@ def test_matrix_faithful_dsr_change_is_pinned_and_deliberate() -> None:
       independent trials over-deflated the search;
     * new default: DSR 0.961623, MinTRL 433 obs, effective trials 3.
 
-    The verdict itself stays not-deployable: the higher DSR is a noisy
+    The verdict itself stays not-deployable HERE: the higher DSR is a noisy
     estimate at only 3 effective trials, and the PBO gate (CSCV measures the
-    selection directly) still catches the overfit search -- the default-deny
-    stack is the protection, not any single gate. Pinned values were computed
-    by running this code (2026-07-31); they move only if the algorithm
-    changes, which is exactly what this pin is here to detect.
+    selection directly) still catches this overfit search. That is a fact
+    about this case, not a guarantee -- when the submitted matrix hides the
+    real search entirely, no gate can see it (see
+    test_hidden_search_near_duplicates_pin_the_documented_trust_model).
+    Pinned values were computed by running this code (2026-07-31); they move
+    only if the algorithm changes, which is exactly what this pin is here to
+    detect.
     """
     from lyravalidate.stats import annualized_sharpe, deflated_sharpe_ratio
 

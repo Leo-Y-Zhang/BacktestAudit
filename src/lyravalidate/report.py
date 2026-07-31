@@ -50,7 +50,9 @@ CITATIONS = (
     "  - Bailey, Borwein, Lopez de Prado & Zhu (2017), The Probability of Backtest "
     "Overfitting (PBO via CSCV).\n"
     "  - Lopez de Prado (2018), Advances in Financial Machine Learning, ch. 7 "
-    "(purged walk-forward CV)."
+    "(purged walk-forward CV).\n"
+    "  - Lopez de Prado & Lewis (2019), Detection of False Investment Strategies "
+    "Using Unsupervised Learning Methods (effective trials, matrix-faithful DSR)."
 )
 
 _REFERENCES: tuple[str, ...] = (
