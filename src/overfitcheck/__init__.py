@@ -1,4 +1,4 @@
-"""BacktestValidator -- an honest verdict on whether a backtest edge is real.
+"""OverfitCheck -- an honest verdict on whether a backtest edge is real.
 
 A standalone *measurement* tool. Point it at your own backtest results and it
 re-implements the published statistics of Bailey & Lopez de Prado -- the Deflated

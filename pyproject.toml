@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "backtestvalidator"
+name = "overfitcheck"
 version = "0.3.0"
-description = "BacktestValidator - an honest, published-statistics verdict on whether a backtest edge is real or overfit. A measurement tool, not a money-maker."
+description = "OverfitCheck - an honest, published-statistics verdict on whether a backtest edge is real or overfit. A measurement tool, not a money-maker."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary - All Rights Reserved" }
@@ -47,13 +47,13 @@ dev = [
 ]
 
 [project.scripts]
-backtest-validate = "backtestvalidator.cli:main"
+overfitcheck = "overfitcheck.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-backtestvalidator = ["py.typed"]
+overfitcheck = ["py.typed"]
 
 # ── ruff ──────────────────────────────────────────────────────────────────────
 [tool.ruff]

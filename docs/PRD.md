@@ -1,4 +1,4 @@
-# BacktestValidator — product requirements
+# OverfitCheck — product requirements
 
 Recorded after v0.3.0 shipped, from the code. Where this and the README
 disagree, the code wins. See [TDD](TDD.md) and [Design Brief](DESIGN_BRIEF.md).

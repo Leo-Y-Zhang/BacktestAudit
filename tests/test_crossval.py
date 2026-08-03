@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from backtestvalidator.crossval import PurgedWalkForwardSplitter, default_walk_forward_splitter
+from overfitcheck.crossval import PurgedWalkForwardSplitter, default_walk_forward_splitter
 
 
 def test_constructor_validation() -> None:

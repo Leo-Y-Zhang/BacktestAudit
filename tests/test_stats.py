@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from scipy.stats import norm
 
-from backtestvalidator.stats import (
+from overfitcheck.stats import (
     EULER_MASCHERONI,
     annualized_sharpe,
     cluster_trials,

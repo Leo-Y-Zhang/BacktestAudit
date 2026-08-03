@@ -7,11 +7,12 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Changed - renamed, breaking for importers and CLI callers
-- The project is now **BacktestValidator** (previously Lyra Validate). The
-  import package is `backtestvalidator` (was `lyravalidate`), the distribution
-  name is `backtestvalidator`, and the console script is `backtest-validate`
-  (was `lyra-validate`). No statistic, threshold, verdict or report figure
-  changed: the rename is textual, and the full suite passes unchanged.
+- The project is now **OverfitCheck** (previously Lyra Validate, then briefly
+  BacktestValidator - neither name was ever released under this heading). The
+  import package is `overfitcheck` (was `lyravalidate`), the distribution name
+  is `overfitcheck`, and the console script is `overfitcheck` (was
+  `lyra-validate`). No statistic, threshold, verdict or report figure changed:
+  the rename is textual, and the full suite passes unchanged.
 - Entries below are left as they were published under the old name; they are a
   record of what shipped, not a description of the current API.
 
