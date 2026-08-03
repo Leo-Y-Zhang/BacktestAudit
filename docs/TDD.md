@@ -185,7 +185,7 @@ version boundary. The 1-D path is unchanged. Reports stamped `v0.3.0` were
 produced against the measured benchmark and should not be compared directly with
 pre-0.3.0 ones.
 
-## Test plan
+## What the 164 tests pin down
 
 164 tests, `pytest -q`. CI runs `ruff check src tests`, `mypy src` (strict,
 `python_version = 3.12`) and `pytest -q` on Python 3.13, with a 15-minute job

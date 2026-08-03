@@ -76,7 +76,7 @@ A false acceptance costs money and, worse, teaches the user to trust the tool.
 - Search size measured from the candidate matrix where possible, rather than
   approximated from the winning column alone.
 
-**Won't, this time**
+**Deliberately absent**
 
 - Signal generation, parameter optimisation, position sizing, execution, or any
   broker connection.
@@ -141,9 +141,9 @@ computation.
 - [x] Exit code `0` / `1`, so it drops into a research pipeline or a CI gate.
 - [x] No network access, ever.
 
-## Rejected
+## Where a defensible-looking choice was refused
 
-| Considered | Rejected because |
+| The choice | Why it was refused |
 |---|---|
 | Ship it as a module inside the author's trading engine | A validator inside the thing it validates has no credibility, and the coupling would drag a heavy research stack into a tool whose value is being small and auditable. |
 | Annualise the Sharpe inside PSR/DSR | The papers are written in per-period units and the estimator variance term does not survive naive rescaling. Annualisation happens only at the reporting boundary. |
@@ -152,7 +152,7 @@ computation.
 | The paper's randomised k-means for effective trials | Non-deterministic: the same matrix could earn different deflation on two runs, which is indefensible in a tool whose output is a go/no-go. Replaced by deterministic average-linkage on the paper's distance, with the deviation documented. |
 | A web UI or hosted service | Someone's live strategy returns would have to leave their machine. The offline guarantee is worth more than the convenience. |
 
-## Two things left open
+## Left unresolved on purpose
 
 Neither blocks v0.3.0, and both are unresolved on purpose rather than
 unanswered.
