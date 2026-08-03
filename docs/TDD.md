@@ -214,6 +214,26 @@ column's undeflated PSR; and the splitter never leaves a training index within
 with non-finite values present, format inference by suffix, and stdout/stderr
 separation.
 
+## The fourth document, and why it is not here
+
+The estate standard asks for four documents. This project has three: this TDD,
+the [PRD](PRD.md), and the [Design Brief](DESIGN_BRIEF.md). There is no App Flow,
+deliberately.
+
+An App Flow enumerates screens, states, and every transition between them. There
+is one non-interactive invocation here — arguments in, one verdict out, process
+exits — with no screens, no navigation, no session and no authorisation state.
+The transitions such a document would capture are the input-rejection paths, the
+three verdicts and the exit codes, and all three are already tabulated above in
+*Every degenerate path, and where it lands* and *CLI*. Restating those tables
+under UI headings would create a second copy to keep true, and the copy would be
+the one that rots, because the tables above are the ones the tests are written
+against.
+
+The Design Brief closes with the same statement from the other side; this
+paragraph exists so a reader who only opens the TDD does not have to infer that
+the omission was a decision rather than an oversight.
+
 ## A known gap
 
 `default_walk_forward_splitter` can auto-size a window longer than the data — any
