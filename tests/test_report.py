@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from lyravalidate import evaluate, render_html, render_markdown, write_report
-from lyravalidate.evaluate import Thresholds, Verdict
-from lyravalidate.report import CITATIONS, DISCLAIMER
+from backtestvalidator import evaluate, render_html, render_markdown, write_report
+from backtestvalidator.evaluate import Thresholds, Verdict
+from backtestvalidator.report import CITATIONS, DISCLAIMER
 
 _FIXED = datetime(2026, 6, 30, 12, 0, tzinfo=timezone.utc)
 
@@ -104,7 +104,7 @@ def test_write_report_markdown_by_suffix(tmp_path: Path) -> None:
     out = tmp_path / "report.md"
     write_report(verdict, str(out), generated_at=_FIXED)
     text = out.read_text(encoding="utf-8")
-    assert text.startswith("# Lyra Validate")
+    assert text.startswith("# BacktestValidator")
     assert text == render_markdown(verdict, generated_at=_FIXED)
 
 
@@ -113,7 +113,7 @@ def test_write_report_format_override(tmp_path: Path) -> None:
     # A .txt suffix would default to HTML, but the explicit override wins.
     out = tmp_path / "report.txt"
     write_report(verdict, str(out), fmt="markdown", generated_at=_FIXED)
-    assert out.read_text(encoding="utf-8").startswith("# Lyra Validate")
+    assert out.read_text(encoding="utf-8").startswith("# BacktestValidator")
 
 
 def test_write_report_rejects_unknown_format(tmp_path: Path) -> None:

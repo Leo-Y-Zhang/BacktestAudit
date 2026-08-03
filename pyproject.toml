@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lyravalidate"
+name = "backtestvalidator"
 version = "0.3.0"
-description = "Lyra Validate - an honest, published-statistics verdict on whether a backtest edge is real or overfit. A measurement tool, not a money-maker."
+description = "BacktestValidator - an honest, published-statistics verdict on whether a backtest edge is real or overfit. A measurement tool, not a money-maker."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary - All Rights Reserved" }
@@ -47,13 +47,13 @@ dev = [
 ]
 
 [project.scripts]
-lyra-validate = "lyravalidate.cli:main"
+backtest-validate = "backtestvalidator.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-lyravalidate = ["py.typed"]
+backtestvalidator = ["py.typed"]
 
 # ── ruff ──────────────────────────────────────────────────────────────────────
 [tool.ruff]

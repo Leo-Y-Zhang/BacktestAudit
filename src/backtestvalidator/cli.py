@@ -1,4 +1,4 @@
-"""Command-line entry point for ``lyra-validate``.
+"""Command-line entry point for ``backtest-validate``.
 
 Reads a CSV of per-period returns (one column = one strategy; multiple columns =
 a candidate matrix) and prints an honest, default-deny verdict. No network access
@@ -6,7 +6,7 @@ is ever performed -- everything runs locally on the file you provide.
 
 Usage::
 
-    lyra-validate returns.csv [--trials N] [--report out.html] [--json]
+    backtest-validate returns.csv [--trials N] [--report out.html] [--json]
 
 The process exits ``0`` when the verdict is ``DEPLOYABLE`` and non-zero otherwise,
 so it composes cleanly inside a research pipeline or a CI gate.
@@ -49,7 +49,7 @@ def _positive_int(text: str) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="lyra-validate",
+        prog="backtest-validate",
         description=DISCLAIMER,
         epilog=CITATIONS,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -114,7 +114,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the methodology disclaimer and citations, then exit.",
     )
-    parser.add_argument("--version", action="version", version=f"lyra-validate {__version__}")
+    parser.add_argument("--version", action="version", version=f"backtest-validate {__version__}")
     return parser
 
 

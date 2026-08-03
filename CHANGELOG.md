@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed - renamed, breaking for importers and CLI callers
+- The project is now **BacktestValidator** (previously Lyra Validate). The
+  import package is `backtestvalidator` (was `lyravalidate`), the distribution
+  name is `backtestvalidator`, and the console script is `backtest-validate`
+  (was `lyra-validate`). No statistic, threshold, verdict or report figure
+  changed: the rename is textual, and the full suite passes unchanged.
+- Entries below are left as they were published under the old name; they are a
+  record of what shipped, not a description of the current API.
+
+### Fixed
+- The README's test count said 157; the suite is 164.
+
 ## [0.3.0] - 2026-07-31
 
 The matrix-faithful deflation release: when the candidate matrix is the whole

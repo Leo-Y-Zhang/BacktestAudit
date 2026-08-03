@@ -1,4 +1,4 @@
-"""Runnable demo for Lyra Validate -- see it work in one shot.
+"""Runnable demo for BacktestValidator -- see it work in one shot.
 
 This script is fully offline and deterministic (seeded). It:
 
@@ -9,13 +9,13 @@ This script is fully offline and deterministic (seeded). It:
    evidence-gap report: the verdict says how much more track record the
    record falls short of, not just "no",
 5. As a cautionary tale, evaluates a 50-configuration noise matrix to show how
-   Lyra Validate flags a search that found nothing but luck.
+   BacktestValidator flags a search that found nothing but luck.
 
 Run it with::
 
     python examples/run_example.py
 
-Nothing here trades, connects to a broker, or promises returns -- Lyra Validate
+Nothing here trades, connects to a broker, or promises returns -- BacktestValidator
 only *measures* how much of an apparent edge is real versus overfit.
 """
 
@@ -26,8 +26,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from lyravalidate import evaluate
-from lyravalidate.report import render_markdown, write_report
+from backtestvalidator import evaluate
+from backtestvalidator.report import render_markdown, write_report
 
 HERE = Path(__file__).resolve().parent
 SAMPLE_CSV = HERE / "sample_returns.csv"

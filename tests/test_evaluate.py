@@ -11,7 +11,7 @@ import math
 import numpy as np
 import pytest
 
-from lyravalidate.evaluate import Thresholds, Verdict, evaluate
+from backtestvalidator.evaluate import Thresholds, Verdict, evaluate
 
 
 def test_positive_control_is_deployable() -> None:
@@ -285,7 +285,7 @@ def test_matrix_default_reports_effective_trials() -> None:
 def test_matrix_explicit_n_trials_keeps_published_deflation() -> None:
     """An explicit n_trials asserts the search size, so the matrix is no longer
     the whole search and the published raw-count deflation applies unchanged."""
-    from lyravalidate.stats import annualized_sharpe, deflated_sharpe_ratio
+    from backtestvalidator.stats import annualized_sharpe, deflated_sharpe_ratio
 
     perf = _planted_candidates(0.9)
     verdict = evaluate(perf, n_trials=12)
@@ -312,7 +312,7 @@ def test_matrix_iid_noise_keeps_the_overfit_conclusion() -> None:
 def test_duplicated_configurations_are_not_extra_trials() -> None:
     """Six copies of one strategy were ONE trial: the matrix-faithful DSR
     collapses to the PSR instead of deflating for a search that never happened."""
-    from lyravalidate.stats import probabilistic_sharpe_ratio
+    from backtestvalidator.stats import probabilistic_sharpe_ratio
 
     rng = np.random.default_rng(7)
     col = 0.001 + 0.01 * rng.standard_normal(500)
@@ -343,7 +343,7 @@ def test_matrix_min_trl_agrees_with_the_dsr_gate() -> None:
 def test_matrix_falls_back_to_published_when_cross_section_unusable() -> None:
     """A matrix without two usable columns cannot be measured cross-sectionally;
     the verdict falls back to the published raw-count deflation (fail-closed)."""
-    from lyravalidate.stats import deflated_sharpe_ratio
+    from backtestvalidator.stats import deflated_sharpe_ratio
 
     rng = np.random.default_rng(4)
     col = 0.0008 + 0.008 * rng.standard_normal(1000)
@@ -361,7 +361,7 @@ def test_single_family_matrix_collapses_to_one_effective_trial() -> None:
     the selected column. Regression for the k=1-unreachable defect, where the
     homogeneous blob shattered into 12 singletons and the diagnostic reported
     12 effective trials where the truth is 1."""
-    from lyravalidate.stats import probabilistic_sharpe_ratio, sharpe_ratio
+    from backtestvalidator.stats import probabilistic_sharpe_ratio, sharpe_ratio
 
     rng = np.random.default_rng(0)
     w = math.sqrt(0.9)
@@ -382,7 +382,7 @@ def test_matrix_short_record_falls_back_to_published_deflation() -> None:
     """Below 100 complete rows measured clustering is not trustworthy (it
     invents families on iid noise, weakening the deflation), so the verdict
     falls back to the published raw-count path -- fail-closed."""
-    from lyravalidate.stats import deflated_sharpe_ratio, sharpe_ratio
+    from backtestvalidator.stats import deflated_sharpe_ratio, sharpe_ratio
 
     rng = np.random.default_rng(3)
     short = 0.01 * rng.standard_normal((60, 10))
@@ -410,7 +410,7 @@ def test_hidden_search_near_duplicates_pin_the_documented_trust_model() -> None:
     explicit n_trials path, which restores the raw-count deflation and flips
     the verdict here. Both are asserted so neither can silently regress.
     """
-    from lyravalidate.stats import probabilistic_sharpe_ratio, sharpe_ratio
+    from backtestvalidator.stats import probabilistic_sharpe_ratio, sharpe_ratio
 
     rng = np.random.default_rng(1)
     hidden_search = 0.01 * rng.standard_normal((400, 200))
@@ -476,7 +476,7 @@ def test_matrix_faithful_dsr_change_is_pinned_and_deliberate() -> None:
     only if the algorithm changes, which is exactly what this pin is here to
     detect.
     """
-    from lyravalidate.stats import annualized_sharpe, deflated_sharpe_ratio
+    from backtestvalidator.stats import annualized_sharpe, deflated_sharpe_ratio
 
     perf = _planted_candidates(0.9)
     best = int(np.argmax([annualized_sharpe(perf[:, j]) for j in range(perf.shape[1])]))
@@ -505,7 +505,7 @@ def test_matrix_faithful_dsr_iid_noise_pin_validates_the_null_approximation() ->
     dispersion is close to the null approximation the published path assumes,
     so the DSR barely moves (0.415233 published raw-N vs 0.426080 measured;
     computed by running this code, 2026-07-31). The conclusion is unchanged."""
-    from lyravalidate.stats import annualized_sharpe, deflated_sharpe_ratio
+    from backtestvalidator.stats import annualized_sharpe, deflated_sharpe_ratio
 
     rng = np.random.default_rng(2024)
     candidates = 0.01 * rng.standard_normal((600, 60))
@@ -530,7 +530,7 @@ def test_no_surviving_fold_refuses_instead_of_gating_in_sample() -> None:
     basis was missing. A tool that exists to refuse overfitted strategies must
     not quietly answer using the overfitted basis.
     """
-    from lyravalidate.crossval import PurgedWalkForwardSplitter
+    from backtestvalidator.crossval import PurgedWalkForwardSplitter
 
     rng = np.random.default_rng(4)
     n = 60
@@ -554,7 +554,7 @@ def test_no_surviving_fold_refuses_instead_of_gating_in_sample() -> None:
 
 def test_a_surviving_fold_still_gates_out_of_sample() -> None:
     """Liveness half: the guard must not refuse a run that DOES have folds."""
-    from lyravalidate.crossval import PurgedWalkForwardSplitter
+    from backtestvalidator.crossval import PurgedWalkForwardSplitter
 
     rng = np.random.default_rng(4)
     n = 60

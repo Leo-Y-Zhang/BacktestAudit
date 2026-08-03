@@ -1,4 +1,4 @@
-"""Tests for the lyra-validate command-line interface."""
+"""Tests for the backtest-validate command-line interface."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lyravalidate.cli import main
+from backtestvalidator.cli import main
 
 _SAMPLE_CSV = Path(__file__).resolve().parents[1] / "examples" / "sample_returns.csv"
 
@@ -113,7 +113,7 @@ def test_cli_writes_markdown_report(tmp_path: Path) -> None:
 
     code = main([str(csv), "--n-trials", "1", "--report", str(report)])
     assert code == 0
-    assert report.read_text(encoding="utf-8").startswith("# Lyra Validate")
+    assert report.read_text(encoding="utf-8").startswith("# BacktestValidator")
 
 
 def test_cli_json_output_is_valid(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

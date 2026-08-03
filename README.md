@@ -1,12 +1,12 @@
-# Lyra Validate
+# BacktestValidator
 
 **An honest verdict on whether your backtest edge is real or overfit.**
 
-Lyra Validate is a standalone Python tool you point at *your own* backtest
+BacktestValidator is a standalone Python tool you point at *your own* backtest
 results. It reports how much of an apparent edge is statistically real versus an
 artefact of luck, non-normal returns, or searching over many configurations.
 
-> **Lyra Validate is a measurement tool, not a money-maker.** It does **not**
+> **BacktestValidator is a measurement tool, not a money-maker.** It does **not**
 > generate trading signals, size positions, connect to a broker, or guarantee
 > returns. It only tells you how much to trust a track record. Nothing here is
 > investment advice.
@@ -16,8 +16,8 @@ artefact of luck, non-normal returns, or searching over many configurations.
 Quants, systematic traders, and researchers who already have a backtest and want
 an honest second opinion *before* risking capital or showing results to an
 allocator. If you have searched over many configurations, optimised parameters,
-or simply want to know whether a promising Sharpe is signal or luck, point Lyra
-Validate at your returns and get a default-deny verdict in seconds.
+or simply want to know whether a promising Sharpe is signal or luck, point
+BacktestValidator at your returns and get a default-deny verdict in seconds.
 
 It is built entirely on **published, peer-reviewed mathematics** and cites it:
 
@@ -44,7 +44,7 @@ python -m pip install -e .
 
 ```python
 import numpy as np
-from lyravalidate import evaluate
+from backtestvalidator import evaluate
 
 rng = np.random.default_rng(0)
 # Your strategy's per-period (e.g. daily) returns:
@@ -157,13 +157,13 @@ The commands below use the demo CSV that ships in this repo. No CSV yet? Run
 `python examples/run_example.py` to (re)generate `examples/sample_returns.csv`.
 
 ```bash
-lyra-validate examples/sample_returns.csv                       # human-readable verdict
-lyra-validate examples/sample_returns.csv --trials 20           # you searched over 20 configs
-lyra-validate examples/sample_returns.csv --column returns      # evaluate one named column
-lyra-validate examples/sample_returns.csv --report verdict.html # also write a one-page report
-lyra-validate examples/sample_returns.csv --report verdict.md   # ...as Markdown (by suffix)
-lyra-validate examples/sample_returns.csv --json                # machine-readable output
-lyra-validate --about                                           # methodology + citations
+backtest-validate examples/sample_returns.csv                       # human-readable verdict
+backtest-validate examples/sample_returns.csv --trials 20           # you searched over 20 configs
+backtest-validate examples/sample_returns.csv --column returns      # evaluate one named column
+backtest-validate examples/sample_returns.csv --report verdict.html # also write a one-page report
+backtest-validate examples/sample_returns.csv --report verdict.md   # ...as Markdown (by suffix)
+backtest-validate examples/sample_returns.csv --json                # machine-readable output
+backtest-validate --about                                           # methodology + citations
 ```
 
 The CLI exits `0` when the verdict is `DEPLOYABLE`, otherwise `1`, so it drops
@@ -260,7 +260,7 @@ infinity.
 
 ## Machine-checked invariants
 
-The suite is 157 tests. Most anchor on hand-computed values from the source
+The suite is 164 tests. Most anchor on hand-computed values from the source
 papers; on top of those, a property-based layer
 ([`tests/test_properties.py`](tests/test_properties.py), Hypothesis as a
 dev-only dependency) machine-checks the mathematical contract on arbitrary
@@ -288,14 +288,14 @@ example counts, so the suite stays fast and reproducible run-to-run.
 ## FAQ
 
 **Does this make money or find strategies?**
-No. Lyra Validate has no signals, no optimiser, no broker, and no trading engine.
+No. BacktestValidator has no signals, no optimiser, no broker, and no trading engine.
 It *measures* whether a track record you already have is statistically real or
 likely overfit. It is a referee, not a player.
 
 **Are these your own statistics?**
 No — and that is the point. The hard mathematics (Probabilistic Sharpe, Deflated
 Sharpe, PBO via CSCV, purged walk-forward CV) is published, peer-reviewed work by
-Bailey, Borwein, López de Prado and Zhu. Lyra Validate is a clean, faithful,
+Bailey, Borwein, López de Prado and Zhu. BacktestValidator is a clean, faithful,
 tested re-implementation of those public methods, cited above.
 
 **What's the difference between the Sharpe and the *Deflated* Sharpe?**
@@ -322,6 +322,19 @@ to `numpy`, `pandas`, and `scipy`.
 **Can I change the thresholds?**
 Yes — they are policy, not law. Tune them via the `Thresholds` dataclass or the
 `--min-deflated-sharpe`, `--min-sharpe`, and `--max-pbo` CLI flags.
+
+## Design documents
+
+- [`docs/PRD.md`](docs/PRD.md) — the problem, who it is for, and what is
+  deliberately out of scope (including why this tool will never generate signals).
+- [`docs/TDD.md`](docs/TDD.md) — the architecture as built: module map, input
+  contract, the `Verdict` record, failure modes, and one known gap.
+- [`docs/DESIGN_BRIEF.md`](docs/DESIGN_BRIEF.md) — the verdict report's visual
+  intent, palette with measured contrast ratios, and content states.
+
+There is no App Flow document: the CLI is a single non-interactive invocation
+with no screens or transitions, and its input-rejection paths and exit codes are
+documented in the TDD instead.
 
 ## License
 

@@ -1,6 +1,6 @@
 """Single source of truth for the package version.
 
-Kept in its own module so that submodules (e.g. :mod:`lyravalidate.report`) can
+Kept in its own module so that submodules (e.g. :mod:`backtestvalidator.report`) can
 import the version without triggering a circular import via the package
 ``__init__``.
 """

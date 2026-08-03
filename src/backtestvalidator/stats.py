@@ -279,7 +279,7 @@ def expected_max_sharpe_benchmark(sigma: float, n_trials: int) -> float:
     Sharpe-estimator standard error -- which, under the null hypothesis of no
     skill, is the standard approximation to the per-trial Sharpe variance (Bailey
     & Lopez de Prado, 2014). Supplying a ``T x N`` candidate matrix to
-    :func:`lyravalidate.evaluate.evaluate` lets the search be measured directly
+    :func:`backtestvalidator.evaluate.evaluate` lets the search be measured directly
     (via PBO) rather than only approximated here.
     """
     n = max(int(n_trials), 1)
@@ -770,7 +770,7 @@ def cross_trial_sharpe_std(
     With few clusters this is a dispersion estimated from few points and is
     correspondingly noisy (a ``ddof=1`` standard deviation of ``K`` values).
     That is inherent to the published method, not a defect of the
-    implementation; it is why :func:`lyravalidate.evaluate.evaluate` keeps the
+    implementation; it is why :func:`backtestvalidator.evaluate.evaluate` keeps the
     deflated Sharpe as one gate among three (Sharpe, PBO) rather than the sole
     arbiter.
     """
@@ -826,7 +826,7 @@ def deflated_sharpe_ratio_from_trials(
     selected:
         The series to judge. Defaults to the column of ``trials`` with the
         highest full-sample Sharpe (the same selection rule
-        :func:`lyravalidate.evaluate.evaluate` applies to a candidate matrix).
+        :func:`backtestvalidator.evaluate.evaluate` applies to a candidate matrix).
 
     Returns
     -------
@@ -896,7 +896,7 @@ def probability_of_backtest_overfitting(
            ``0.0`` reads as "no overfitting", which is *optimistic*, not
            fail-closed. When PBO is used as a deployment gate, pass
            ``degenerate_value=1.0`` so that an unrankable input is rejected
-           rather than waved through. :func:`lyravalidate.evaluate.evaluate`
+           rather than waved through. :func:`backtestvalidator.evaluate.evaluate`
            does exactly this.
 
     Returns

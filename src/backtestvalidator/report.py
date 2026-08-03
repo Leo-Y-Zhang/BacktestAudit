@@ -1,4 +1,4 @@
-"""Render a clean, one-page Lyra Validate report from a :class:`Verdict`.
+"""Render a clean, one-page BacktestValidator report from a :class:`Verdict`.
 
 Two faithful renderings of the same content are provided:
 
@@ -33,7 +33,7 @@ __all__ = [
 ]
 
 DISCLAIMER = (
-    "Lyra Validate is a MEASUREMENT tool, not a money-maker. It estimates whether a "
+    "BacktestValidator is a MEASUREMENT tool, not a money-maker. It estimates whether a "
     "backtested edge is statistically real or likely overfit; it does NOT generate "
     "signals, trade, size positions, or guarantee returns. Methods are the published "
     "Deflated Sharpe Ratio and Probability of Backtest Overfitting (CSCV) of Bailey & "
@@ -242,7 +242,7 @@ def render_markdown(
     verdict: Verdict,
     *,
     thresholds: Thresholds | None = None,
-    title: str = "Lyra Validate - Backtest Verdict",
+    title: str = "BacktestValidator - Backtest Verdict",
     generated_at: datetime | None = None,
 ) -> str:
     """Render a one-page Markdown report for ``verdict``.
@@ -250,10 +250,10 @@ def render_markdown(
     Parameters
     ----------
     verdict:
-        The :class:`~lyravalidate.evaluate.Verdict` to report on.
+        The :class:`~backtestvalidator.evaluate.Verdict` to report on.
     thresholds:
         The policy the verdict was judged against (for the cutoff column).
-        Defaults to :class:`~lyravalidate.evaluate.Thresholds` defaults.
+        Defaults to :class:`~backtestvalidator.evaluate.Thresholds` defaults.
     title:
         Heading for the report.
     generated_at:
@@ -271,7 +271,7 @@ def render_markdown(
         "",
         f"_{subtitle}_",
         "",
-        f"Generated {_timestamp(generated_at)} | Lyra Validate v{__version__}",
+        f"Generated {_timestamp(generated_at)} | BacktestValidator v{__version__}",
         "",
         "## Gates",
         "",
@@ -364,7 +364,7 @@ def render_html(
     verdict: Verdict,
     *,
     thresholds: Thresholds | None = None,
-    title: str = "Lyra Validate - Backtest Verdict",
+    title: str = "BacktestValidator - Backtest Verdict",
     generated_at: datetime | None = None,
 ) -> str:
     """Render a self-contained, one-page HTML report for ``verdict``.
@@ -424,13 +424,13 @@ def render_html(
 <body>
   <main class="page">
     <header class="banner" style="background:{bg};color:{fg}">
-      <p class="label">Lyra Validate &middot; Backtest Verdict</p>
+      <p class="label">BacktestValidator &middot; Backtest Verdict</p>
       <h1>{_esc(verdict.classification)}</h1>
       <p>{_esc(subtitle)}</p>
     </header>
     <div class="body">
       <p class="meta">Generated {_esc(_timestamp(generated_at))} &middot; \
-Lyra Validate v{_esc(__version__)}</p>
+BacktestValidator v{_esc(__version__)}</p>
 
       <h2>Gates</h2>
       <table>
@@ -473,7 +473,7 @@ def write_report(
     *,
     thresholds: Thresholds | None = None,
     fmt: str | None = None,
-    title: str = "Lyra Validate - Backtest Verdict",
+    title: str = "BacktestValidator - Backtest Verdict",
     generated_at: datetime | None = None,
 ) -> str:
     """Render ``verdict`` and write it to ``path``; return the path written.

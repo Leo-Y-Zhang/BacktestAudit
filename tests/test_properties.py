@@ -27,8 +27,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as hnp
 
-from lyravalidate.crossval import PurgedWalkForwardSplitter
-from lyravalidate.stats import (
+from backtestvalidator.crossval import PurgedWalkForwardSplitter
+from backtestvalidator.stats import (
     cluster_trials,
     cross_trial_sharpe_std,
     deflated_sharpe_ratio,
@@ -40,12 +40,12 @@ from lyravalidate.stats import (
 )
 
 settings.register_profile(
-    "lyravalidate",
+    "backtestvalidator",
     max_examples=40,
     derandomize=True,
     deadline=None,
 )
-settings.load_profile("lyravalidate")
+settings.load_profile("backtestvalidator")
 
 # Per-period returns bounded to a generous +/-50%; NaN/inf are injected
 # explicitly because the statistics are contracted to drop non-finite entries.
