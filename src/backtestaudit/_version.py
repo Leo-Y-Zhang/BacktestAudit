@@ -1,6 +1,6 @@
 """Single source of truth for the package version.
 
-Kept in its own module so that submodules (e.g. :mod:`overfitcheck.report`) can
+Kept in its own module so that submodules (e.g. :mod:`backtestaudit.report`) can
 import the version without triggering a circular import via the package
 ``__init__``.
 """

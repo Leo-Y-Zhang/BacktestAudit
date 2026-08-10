@@ -27,8 +27,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as hnp
 
-from overfitcheck.crossval import PurgedWalkForwardSplitter
-from overfitcheck.stats import (
+from backtestaudit.crossval import PurgedWalkForwardSplitter
+from backtestaudit.stats import (
     cluster_trials,
     cross_trial_sharpe_std,
     deflated_sharpe_ratio,
@@ -40,12 +40,12 @@ from overfitcheck.stats import (
 )
 
 settings.register_profile(
-    "overfitcheck",
+    "backtestaudit",
     max_examples=40,
     derandomize=True,
     deadline=None,
 )
-settings.load_profile("overfitcheck")
+settings.load_profile("backtestaudit")
 
 # Per-period returns bounded to a generous +/-50%; NaN/inf are injected
 # explicitly because the statistics are contracted to drop non-finite entries.

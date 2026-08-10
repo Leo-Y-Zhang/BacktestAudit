@@ -1,7 +1,7 @@
-# OverfitCheck — technical design
+# BacktestAudit — technical design
 
 v0.3.0 as implemented, derived from the source rather than the README. Line
-references are to `src/overfitcheck/`. Requirements: [PRD.md](PRD.md).
+references are to `src/backtestaudit/`. Requirements: [PRD.md](PRD.md).
 
 ## Shape
 
@@ -135,7 +135,7 @@ it with `degenerate_value=1.0` so an unrankable matrix is rejected.
 
 ## CLI
 
-`overfitcheck PATH [--column NAME] [--trials N] [--periods-per-year K]
+`backtestaudit PATH [--column NAME] [--trials N] [--periods-per-year K]
 [--pbo-splits S] [--report OUT] [--json] [--min-deflated-sharpe X]
 [--min-sharpe X] [--max-pbo X] [--about] [--version]`
 

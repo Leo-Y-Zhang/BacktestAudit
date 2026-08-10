@@ -6,12 +6,7 @@ BacktestAudit is a standalone Python tool you point at *your own* backtest
 results. It reports how much of an apparent edge is statistically real versus an
 artefact of luck, non-normal returns, or searching over many configurations.
 
-> The installed package and the command are both `overfitcheck`, which is what
-> the tool was called first. The repository name is the one that changed, so
-> `pip install -e .` gives you an `overfitcheck` command, not a `backtestaudit`
-> one.
-
-> **OverfitCheck is a measurement tool, not a money-maker.** It does **not**
+> **BacktestAudit is a measurement tool, not a money-maker.** It does **not**
 > generate trading signals, size positions, connect to a broker, or guarantee
 > returns. It only tells you how much to trust a track record. Nothing here is
 > investment advice.
@@ -22,7 +17,7 @@ Quants, systematic traders, and researchers who already have a backtest and want
 an honest second opinion *before* risking capital or showing results to an
 allocator. If you have searched over many configurations, optimised parameters,
 or simply want to know whether a promising Sharpe is signal or luck, point
-OverfitCheck at your returns and get a default-deny verdict in seconds.
+BacktestAudit at your returns and get a default-deny verdict in seconds.
 
 It is built entirely on **published, peer-reviewed mathematics** and cites it:
 
@@ -47,14 +42,14 @@ cd BacktestAudit
 python -m pip install -e .
 ```
 
-That puts the `overfitcheck` console script on your PATH and the `overfitcheck`
+That puts the `backtestaudit` console script on your PATH and the `backtestaudit`
 package on your import path.
 
 ## Library usage
 
 ```python
 import numpy as np
-from overfitcheck import evaluate
+from backtestaudit import evaluate
 
 rng = np.random.default_rng(0)
 # Your strategy's per-period (e.g. daily) returns:
@@ -167,13 +162,13 @@ The commands below use the demo CSV that ships in this repo. No CSV yet? Run
 `python examples/run_example.py` to (re)generate `examples/sample_returns.csv`.
 
 ```bash
-overfitcheck examples/sample_returns.csv                        # human-readable verdict
-overfitcheck examples/sample_returns.csv --trials 20            # you searched over 20 configs
-overfitcheck examples/sample_returns.csv --column returns       # evaluate one named column
-overfitcheck examples/sample_returns.csv --report verdict.html  # also write a one-page report
-overfitcheck examples/sample_returns.csv --report verdict.md    # ...as Markdown (by suffix)
-overfitcheck examples/sample_returns.csv --json                 # machine-readable output
-overfitcheck --about                                            # methodology + citations
+backtestaudit examples/sample_returns.csv                        # human-readable verdict
+backtestaudit examples/sample_returns.csv --trials 20            # you searched over 20 configs
+backtestaudit examples/sample_returns.csv --column returns       # evaluate one named column
+backtestaudit examples/sample_returns.csv --report verdict.html  # also write a one-page report
+backtestaudit examples/sample_returns.csv --report verdict.md    # ...as Markdown (by suffix)
+backtestaudit examples/sample_returns.csv --json                 # machine-readable output
+backtestaudit --about                                            # methodology + citations
 ```
 
 The CLI exits `0` when the verdict is `DEPLOYABLE`, otherwise `1`, so it drops
@@ -298,14 +293,14 @@ example counts, so the suite stays fast and reproducible run-to-run.
 ## FAQ
 
 **Does this make money or find strategies?**
-No. OverfitCheck has no signals, no optimiser, no broker, and no trading engine.
+No. BacktestAudit has no signals, no optimiser, no broker, and no trading engine.
 It *measures* whether a track record you already have is statistically real or
 likely overfit. It is a referee, not a player.
 
 **Are these your own statistics?**
 No — and that is the point. The hard mathematics (Probabilistic Sharpe, Deflated
 Sharpe, PBO via CSCV, purged walk-forward CV) is published, peer-reviewed work by
-Bailey, Borwein, López de Prado and Zhu. OverfitCheck is a clean, faithful,
+Bailey, Borwein, López de Prado and Zhu. BacktestAudit is a clean, faithful,
 tested re-implementation of those public methods, cited above.
 
 **What's the difference between the Sharpe and the *Deflated* Sharpe?**

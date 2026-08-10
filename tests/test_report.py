@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from overfitcheck import evaluate, render_html, render_markdown, write_report
-from overfitcheck.evaluate import Thresholds, Verdict
-from overfitcheck.report import CITATIONS, DISCLAIMER
+from backtestaudit import evaluate, render_html, render_markdown, write_report
+from backtestaudit.evaluate import Thresholds, Verdict
+from backtestaudit.report import CITATIONS, DISCLAIMER
 
 _FIXED = datetime(2026, 6, 30, 12, 0, tzinfo=timezone.utc)
 
@@ -104,7 +104,7 @@ def test_write_report_markdown_by_suffix(tmp_path: Path) -> None:
     out = tmp_path / "report.md"
     write_report(verdict, str(out), generated_at=_FIXED)
     text = out.read_text(encoding="utf-8")
-    assert text.startswith("# OverfitCheck")
+    assert text.startswith("# BacktestAudit")
     assert text == render_markdown(verdict, generated_at=_FIXED)
 
 
@@ -113,7 +113,7 @@ def test_write_report_format_override(tmp_path: Path) -> None:
     # A .txt suffix would default to HTML, but the explicit override wins.
     out = tmp_path / "report.txt"
     write_report(verdict, str(out), fmt="markdown", generated_at=_FIXED)
-    assert out.read_text(encoding="utf-8").startswith("# OverfitCheck")
+    assert out.read_text(encoding="utf-8").startswith("# BacktestAudit")
 
 
 def test_write_report_rejects_unknown_format(tmp_path: Path) -> None:

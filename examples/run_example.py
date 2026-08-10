@@ -1,4 +1,4 @@
-"""Runnable demo for OverfitCheck -- see it work in one shot.
+"""Runnable demo for BacktestAudit -- see it work in one shot.
 
 This script is fully offline and deterministic (seeded). It:
 
@@ -9,13 +9,13 @@ This script is fully offline and deterministic (seeded). It:
    evidence-gap report: the verdict says how much more track record the
    record falls short of, not just "no",
 5. As a cautionary tale, evaluates a 50-configuration noise matrix to show how
-   OverfitCheck flags a search that found nothing but luck.
+   BacktestAudit flags a search that found nothing but luck.
 
 Run it with::
 
     python examples/run_example.py
 
-Nothing here trades, connects to a broker, or promises returns -- OverfitCheck
+Nothing here trades, connects to a broker, or promises returns -- BacktestAudit
 only *measures* how much of an apparent edge is real versus overfit.
 """
 
@@ -26,8 +26,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from overfitcheck import evaluate
-from overfitcheck.report import render_markdown, write_report
+from backtestaudit import evaluate
+from backtestaudit.report import render_markdown, write_report
 
 HERE = Path(__file__).resolve().parent
 SAMPLE_CSV = HERE / "sample_returns.csv"

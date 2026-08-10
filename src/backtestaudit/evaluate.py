@@ -84,7 +84,7 @@ class Verdict:
     # Supplementary diagnostics (not gates):
     probabilistic_sharpe: float = float("nan")
     # Finite observations actually judged. Every statistic drops NaN/inf
-    # entries (see overfitcheck.stats), so non-finite rows -- e.g. blank CSV
+    # entries (see backtestaudit.stats), so non-finite rows -- e.g. blank CSV
     # cells -- are not evidence and are not counted here either.
     n_periods: int = 0
     periods_per_year: int = 252
@@ -238,7 +238,7 @@ def _resolve_strategy(
     the matrix, so the published raw-count approximation is kept for it. When
     the cross-section is unusable or too short to measure (fewer than 100
     complete rows, or no more rows than columns -- see
-    :func:`overfitcheck.stats.cluster_trials`) the published approximation is
+    :func:`backtestaudit.stats.cluster_trials`) the published approximation is
     the fallback (fail-closed: the assumed search is never weakened by a
     failed or untrustworthy measurement).
     """

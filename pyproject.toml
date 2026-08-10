@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "overfitcheck"
+name = "backtestaudit"
 version = "0.3.0"
-description = "OverfitCheck - an honest, published-statistics verdict on whether a backtest edge is real or overfit. A measurement tool, not a money-maker."
+description = "BacktestAudit - an honest, published-statistics verdict on whether a backtest edge is real or overfit. A measurement tool, not a money-maker."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary - All Rights Reserved" }
@@ -47,13 +47,13 @@ dev = [
 ]
 
 [project.scripts]
-overfitcheck = "overfitcheck.cli:main"
+backtestaudit = "backtestaudit.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-overfitcheck = ["py.typed"]
+backtestaudit = ["py.typed"]
 
 # ── ruff ──────────────────────────────────────────────────────────────────────
 [tool.ruff]

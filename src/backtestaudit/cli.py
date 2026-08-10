@@ -1,4 +1,4 @@
-"""Command-line entry point for ``overfitcheck``.
+"""Command-line entry point for ``backtestaudit``.
 
 Reads a CSV of per-period returns (one column = one strategy; multiple columns =
 a candidate matrix) and prints an honest, default-deny verdict. No network access
@@ -6,7 +6,7 @@ is ever performed -- everything runs locally on the file you provide.
 
 Usage::
 
-    overfitcheck returns.csv [--trials N] [--report out.html] [--json]
+    backtestaudit returns.csv [--trials N] [--report out.html] [--json]
 
 The process exits ``0`` when the verdict is ``DEPLOYABLE`` and non-zero otherwise,
 so it composes cleanly inside a research pipeline or a CI gate.
@@ -49,7 +49,7 @@ def _positive_int(text: str) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="overfitcheck",
+        prog="backtestaudit",
         description=DISCLAIMER,
         epilog=CITATIONS,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -114,7 +114,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the methodology disclaimer and citations, then exit.",
     )
-    parser.add_argument("--version", action="version", version=f"overfitcheck {__version__}")
+    parser.add_argument("--version", action="version", version=f"backtestaudit {__version__}")
     return parser
 
 
