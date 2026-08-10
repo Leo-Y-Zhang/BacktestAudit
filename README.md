@@ -37,8 +37,8 @@ ever performed.
 ## Install
 
 ```bash
-git clone https://github.com/GreenPandaTech/OverfitCheck.git
-cd OverfitCheck
+git clone https://github.com/Leo-Y-Zhang/BacktestAudit.git
+cd BacktestAudit
 python -m pip install -e .
 ```
 
