@@ -1,10 +1,15 @@
-# OverfitCheck
+# BacktestAudit
 
 **An honest verdict on whether your backtest edge is real or overfit.**
 
-OverfitCheck is a standalone Python tool you point at *your own* backtest
+BacktestAudit is a standalone Python tool you point at *your own* backtest
 results. It reports how much of an apparent edge is statistically real versus an
 artefact of luck, non-normal returns, or searching over many configurations.
+
+> The installed package and the command are both `overfitcheck`, which is what
+> the tool was called first. The repository name is the one that changed, so
+> `pip install -e .` gives you an `overfitcheck` command, not a `backtestaudit`
+> one.
 
 > **OverfitCheck is a measurement tool, not a money-maker.** It does **not**
 > generate trading signals, size positions, connect to a broker, or guarantee
