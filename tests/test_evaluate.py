@@ -569,3 +569,31 @@ def test_a_surviving_fold_still_gates_out_of_sample() -> None:
         returns, predictions=predictions, targets=targets, n_trials=1, splitter=splitter
     )
     assert not any("no usable fold" in r for r in verdict.reasons)
+
+
+@pytest.mark.parametrize("missing", ["targets", "predictions"])
+def test_half_an_out_of_sample_request_is_refused_not_ignored(missing: str) -> None:
+    """Half a predictions/targets pair must not silently fall back to in-sample.
+
+    The out-of-sample block is gated on ``predictions is not None and targets is
+    not None``, so dropping either one skipped the walk-forward entirely and
+    gated the IN-SAMPLE series with nothing in the output saying so -- the same
+    failure the no-usable-fold guard above exists to prevent, reached by a
+    one-word typo instead. Measured before the guard, on a flattering in-sample
+    record and a signal with no predictive power at all:
+    ``evaluate(returns, predictions=p, targets=t)`` gave NOT_DEPLOYABLE while
+    ``evaluate(returns, predictions=p)`` gave DEPLOYABLE.
+    """
+    rng = np.random.default_rng(11)
+    n = 900
+    targets = 0.01 * rng.standard_normal(n)
+    predictions = rng.standard_normal(n)  # no predictive power whatsoever
+    returns = 0.0015 + 0.01 * rng.standard_normal(n)  # a flattering in-sample record
+
+    both = evaluate(returns, predictions=predictions, targets=targets)
+    assert not both.deployable, "control: the honest out-of-sample answer is a rejection"
+
+    kwargs = {"predictions": predictions, "targets": targets}
+    del kwargs[missing]
+    with pytest.raises(ValueError, match="predictions and targets"):
+        evaluate(returns, **kwargs)

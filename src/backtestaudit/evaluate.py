@@ -301,7 +301,10 @@ def evaluate(
     predictions, targets:
         Optional paired per-period signal scores and the forward returns they aim
         to predict. When supplied, an honest purged walk-forward OOS series is
-        built and used as the basis for the Sharpe / deflated-Sharpe gates.
+        built and used as the basis for the Sharpe / deflated-Sharpe gates. They
+        must be supplied together: one without the other is an out-of-sample
+        request that cannot be honoured, and raises ``ValueError`` rather than
+        being answered on the in-sample series.
     n_trials:
         Number of configurations tried during research (selection-bias count).
         Defaults to ``N`` for a candidate matrix, else ``1``. Supplying it for
@@ -324,6 +327,18 @@ def evaluate(
     """
     if periods_per_year <= 0:
         raise ValueError("periods_per_year must be > 0")
+    if (predictions is None) != (targets is None):
+        # Half a pair is still a request to be judged out of sample, and the
+        # walk-forward cannot be built from one side of it. Falling through
+        # leaves `strategy` as the IN-SAMPLE series and gates on that, silently
+        # answering a different question -- the same failure the no-usable-fold
+        # refusal below guards against, reached by a dropped keyword instead.
+        missing = "targets" if targets is None else "predictions"
+        raise ValueError(
+            "predictions and targets must be supplied together for an "
+            f"out-of-sample verdict; {missing} is missing. Supply both, or "
+            "neither to judge the supplied returns in sample."
+        )
     thr = thresholds or Thresholds()
 
     strategy, pbo, n_trials_eff, matrix_deflation = _resolve_strategy(

@@ -126,7 +126,10 @@ The published bound is defined for the number of configurations tried.
 **Supplying `predictions` and `targets` *is* the request to be gated out of
 sample.** The OOS series replaces the in-sample one as the basis for every
 statistic, and the matrix-measured benchmark is discarded, because its units
-belong to the in-sample search rather than to the walk-forward series.
+belong to the in-sample search rather than to the walk-forward series. The two
+must arrive together: one without the other is that same request with no way to
+honour it, so `evaluate` raises `ValueError` rather than quietly gating the
+in-sample series and answering a different question.
 
 `Thresholds(min_deflated_sharpe=0.95, min_sharpe=0.75, max_pbo=0.5)` is policy —
 frozen, injectable. `probability_of_backtest_overfitting(...)` keeps the
@@ -185,9 +188,9 @@ version boundary. The 1-D path is unchanged. Reports stamped `v0.3.0` were
 produced against the measured benchmark and should not be compared directly with
 pre-0.3.0 ones.
 
-## What the 164 tests pin down
+## What the 166 tests pin down
 
-164 tests, `pytest -q`. CI runs `ruff check src tests`, `mypy src` (strict,
+166 tests, `pytest -q`. CI runs `ruff check src tests`, `mypy src` (strict,
 `python_version = 3.12`) and `pytest -q` on Python 3.13, with a 15-minute job
 timeout and a gitleaks job.
 

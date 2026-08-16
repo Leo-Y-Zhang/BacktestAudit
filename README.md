@@ -265,7 +265,7 @@ infinity.
 
 ## Machine-checked invariants
 
-The suite is 164 tests. Most anchor on hand-computed values from the source
+The suite is 166 tests. Most anchor on hand-computed values from the source
 papers; on top of those, a property-based layer
 ([`tests/test_properties.py`](tests/test_properties.py), Hypothesis as a
 dev-only dependency) machine-checks the mathematical contract on arbitrary

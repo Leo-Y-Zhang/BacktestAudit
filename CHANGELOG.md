@@ -17,7 +17,14 @@ All notable changes to this project are documented here. The format is based on
   record of what shipped, not a description of the current API.
 
 ### Fixed
-- The README's test count said 157; the suite is 164.
+- `evaluate()` silently ignored `predictions` or `targets` when only one of the
+  pair was supplied, gating the **in-sample** series while the caller had asked
+  to be judged out of sample. On a flattering in-sample record and a signal with
+  no predictive power, `evaluate(returns, predictions=p, targets=t)` returned
+  NOT_DEPLOYABLE and `evaluate(returns, predictions=p)` returned DEPLOYABLE.
+  Half a pair now raises `ValueError` (exit code 2 through the CLI), matching
+  the existing refusal when no walk-forward fold survives purging.
+- The README's test count said 157; the suite is 166.
 
 ## [0.3.0] - 2026-07-31
 
