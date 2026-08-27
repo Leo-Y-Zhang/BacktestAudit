@@ -39,8 +39,11 @@ jobs:
       - name: Mypy (type-check)
         run: python -m mypy src
 
+      # No -q here: pyproject.toml already sets it in addopts, and passing it
+      # twice suppresses the summary line, so the log ended on the warnings
+      # block and never recorded how many tests actually ran.
       - name: Pytest
-        run: python -m pytest -q
+        run: python -m pytest
 
   # The gitleaks binary directly rather than gitleaks-action, and the whole
   # history rather than a diff. The action scans only the range
