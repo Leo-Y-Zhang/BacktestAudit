@@ -36,6 +36,10 @@ ever performed.
 
 ## Install
 
+**Python 3.10 or newer** is the only prerequisite. There is no compiler,
+solver, toolchain, dataset or API key to set up, and no account to create;
+`pip` pulls `numpy`, `pandas` and `scipy` and that is the whole of it.
+
 ```bash
 git clone https://github.com/Leo-Y-Zhang/BacktestAudit.git
 cd BacktestAudit
@@ -44,6 +48,23 @@ python -m pip install -e .
 
 That puts the `backtestaudit` console script on your PATH and the `backtestaudit`
 package on your import path.
+
+### Running the tests
+
+The suite needs the `dev` extra, which adds `pytest` and the `hypothesis`
+property layer on top of the runtime dependencies. From the clone, one command
+installs and runs everything:
+
+```bash
+python -m pip install -e ".[dev]" && python -m pytest
+```
+
+It reports `166 passed` in about 40 seconds. Do not add `-q`: `pyproject.toml`
+already sets it, and a second one suppresses the summary line. CI runs the same
+`pytest` plus `python -m ruff check src tests` and `python -m mypy src`
+(strict), both of which the same extra installs. The type-check targets Python
+3.12 for the reason recorded in `pyproject.toml`; the package itself runs on the
+3.10 floor.
 
 ## Library usage
 
