@@ -112,6 +112,81 @@ def test_bad_periods_per_year_raises() -> None:
         evaluate([0.01, 0.02, 0.03, 0.04], periods_per_year=0)
 
 
+# ── threshold boundaries: an equality case must not slip through as a pass ────
+#
+# Mutation testing (audit/mutants/BacktestAudit.md) found that every gate in
+# this module is exercised on *direction* (comfortably above / comfortably
+# below its bar) but never at the exact boundary value itself -- so a mutant
+# that quietly relaxed a "<=" to a "<" (or a ">=" to a ">") survived. The
+# tests below pin the boundary itself, not just which side of it a random
+# record happens to land on.
+
+
+def test_sharpe_exactly_at_threshold_is_not_deployable() -> None:
+    """A Sharpe landing exactly on the policy bar must fail it, not clear it.
+
+    ``evaluate()`` gates on ``sharpe <= thr.min_sharpe``; building the
+    threshold from the record's own measured Sharpe makes the equality
+    exact (not merely close), so a mutant relaxing this to strict ``<``
+    flips the verdict.
+    """
+    rng = np.random.default_rng(55)
+    returns = 0.0008 + 0.008 * rng.standard_normal(1500)
+    probe = evaluate(returns, n_trials=1)
+    # Neutralise the other two gates so only the Sharpe boundary can fail it.
+    thr = Thresholds(min_sharpe=probe.sharpe, min_deflated_sharpe=0.0, max_pbo=1.0)
+    verdict = evaluate(returns, n_trials=1, thresholds=thr)
+    assert verdict.deployable is False
+    assert any(
+        r.startswith(f"Annualised Sharpe {probe.sharpe:.3f} <=") for r in verdict.reasons
+    )
+
+
+def test_confidence_bar_of_one_is_unreachable() -> None:
+    """A deflated-Sharpe confidence bar of exactly 1.0 can never be reached.
+
+    ``conf >= 1.0`` short-circuits MinTRL to infinity with a dedicated
+    reason. Relaxing it to ``conf > 1.0`` either raises inside
+    ``minimum_track_record_length`` (whose own guard requires
+    ``confidence < 1``) or, at the second call site, mislabels *why* MinTRL
+    is unreachable.
+    """
+    rng = np.random.default_rng(3)
+    returns = 0.0008 + 0.008 * rng.standard_normal(1500)
+    verdict = evaluate(returns, n_trials=1, thresholds=Thresholds(min_deflated_sharpe=1.0))
+    assert math.isinf(verdict.min_track_record)
+    assert any("confidence bar of 1.00 can never be reached" in r for r in verdict.reasons)
+
+
+def test_confidence_bar_of_zero_is_trivially_met() -> None:
+    """A non-positive deflated-Sharpe bar is met by any record: MinTRL is 0.0.
+
+    ``conf <= 0.0`` short-circuits to ``min_trl = 0.0``. Relaxing the
+    comparison to ``conf < 0.0`` raises inside
+    ``minimum_track_record_length`` for ``conf == 0.0``; corrupting the
+    assigned value to ``None`` raises ``TypeError`` the next time it is
+    compared or formatted -- either way this assertion cannot pass.
+    """
+    rng = np.random.default_rng(3)
+    returns = 0.0008 + 0.008 * rng.standard_normal(1500)
+    verdict = evaluate(returns, n_trials=1, thresholds=Thresholds(min_deflated_sharpe=0.0))
+    assert verdict.min_track_record == 0.0
+
+
+def test_default_periods_per_year_is_252() -> None:
+    """The ``periods_per_year=252`` default itself is untested elsewhere.
+
+    Every other test supplies ``periods_per_year`` explicitly, so a wrong
+    default value (used whenever a caller omits it) would go unnoticed.
+    """
+    rng = np.random.default_rng(3)
+    returns = 0.0008 + 0.008 * rng.standard_normal(1500)
+    by_default = evaluate(returns, n_trials=1)
+    explicit = evaluate(returns, n_trials=1, periods_per_year=252)
+    assert by_default.periods_per_year == 252
+    assert by_default.sharpe == explicit.sharpe
+
+
 def test_verdict_is_frozen_and_summarises() -> None:
     rng = np.random.default_rng(1)
     returns = 0.0008 + 0.008 * rng.standard_normal(1000)

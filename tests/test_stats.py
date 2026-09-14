@@ -412,6 +412,35 @@ def test_pbo_max_blocks_caps_cost() -> None:
     assert 0.0 <= pbo <= 1.0
 
 
+def test_pbo_hand_computed_exact_median_tie_counts_as_overfit() -> None:
+    """CSCV's own rule is ``logit <= 0`` (the worse-*or-tied* OOS half); an
+    exact median tie must count toward PBO, not be dropped as if it fell on
+    the better side.
+
+    Hand-derived with ``n_splits=2`` (``S=2`` blocks of 2 rows, so both CSCV
+    partitions are exercised): block sums are engineered so that in *both*
+    partitions the in-sample-best column's out-of-sample rank is exactly the
+    median of 3 columns (``w = 2 / (3 + 1) = 0.5``, ``logit = ln(1) = 0``).
+
+    Partition A (IS = rows 0-1, OOS = rows 2-3): IS sums ``[5, 10, 1]`` ->
+    best = column 1; OOS sums ``[5, 3, 1]`` -> column 1's OOS rank is 2 of 3.
+    Partition B (IS = rows 2-3, OOS = rows 0-1): IS sums ``[5, 3, 1]`` ->
+    best = column 0; OOS sums ``[5, 10, 1]`` -> column 0's OOS rank is 2 of 3.
+
+    Both partitions land exactly at the tie, so the correct, published rule
+    counts both as overfit evidence: PBO == 1.0 exactly, not 0.0.
+    """
+    M = np.array(
+        [
+            [2.0, 5.0, 0.0],
+            [3.0, 5.0, 1.0],
+            [2.0, 1.0, 0.0],
+            [3.0, 2.0, 1.0],
+        ]
+    )
+    assert probability_of_backtest_overfitting(M, n_splits=2) == pytest.approx(1.0)
+
+
 # ── effective trials via correlation clustering (Lopez de Prado & Lewis 2019) ─
 
 
