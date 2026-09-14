@@ -17,6 +17,8 @@ def test_constructor_validation() -> None:
     with pytest.raises(ValueError):
         PurgedWalkForwardSplitter(4, 0, 2, 0, 1)
     with pytest.raises(ValueError):
+        PurgedWalkForwardSplitter(4, 2, 0, 0, 1)
+    with pytest.raises(ValueError):
         PurgedWalkForwardSplitter(4, 2, 2, -1, 1)
     with pytest.raises(ValueError):
         PurgedWalkForwardSplitter(4, 2, 2, 0, 0)
@@ -82,6 +84,56 @@ def test_fully_purged_fold_is_skipped() -> None:
         train_size=2, valid_size=1, test_size=1, embargo_size=0, label_horizon=5
     )
     assert spl.split(4) == []
+
+
+def test_purge_one_bar_too_short_lets_a_known_leak_through() -> None:
+    """A purge distance one bar short of the true label horizon lets a
+    look-ahead observation into training; the correctly configured splitter
+    keeps it out.
+
+    With ``train_size=6`` the raw training window is positions ``0..5`` and
+    ``eval_start=6``. If the true forward-label horizon is 2 bars, position
+    4's label spans ``[4, 6)`` -- it just touches the evaluation window and
+    must be purged. A splitter correctly configured with ``label_horizon=2``
+    does that. A splitter (mis)configured one bar short, with
+    ``label_horizon=1``, only purges position 5 and leaks position 4 into
+    training -- exactly the class of look-ahead leak purging exists to
+    prevent (audit/mutants/BacktestAudit.md, S3b).
+    """
+    leaking_position = 4
+    correct = PurgedWalkForwardSplitter(
+        train_size=6, valid_size=2, test_size=2, embargo_size=0, label_horizon=2
+    )
+    one_bar_too_short = PurgedWalkForwardSplitter(
+        train_size=6, valid_size=2, test_size=2, embargo_size=0, label_horizon=1
+    )
+    correct_train, _valid, _test = correct.split(10)[0]
+    leaky_train, _valid, _test = one_bar_too_short.split(10)[0]
+    assert leaking_position not in correct_train.tolist()
+    assert leaking_position in leaky_train.tolist()
+
+
+def test_embargo_one_bar_too_short_lets_a_known_leak_through() -> None:
+    """The same leak, via an embargo one bar short of what the caller needs.
+
+    Embargo removes training bars *beyond* what purging already removes, to
+    guard against look-ahead through lagged/serially-correlated features.
+    With ``train_size=6``, ``label_horizon=1`` (purge alone keeps position 4,
+    the last unpurged bar) and a caller who needs a 2-bar embargo margin: an
+    embargo of 2 additionally drops position 4, while an embargo one bar
+    short (1) leaks it into training.
+    """
+    leaking_position = 4
+    correct = PurgedWalkForwardSplitter(
+        train_size=6, valid_size=2, test_size=2, embargo_size=2, label_horizon=1
+    )
+    one_bar_too_short = PurgedWalkForwardSplitter(
+        train_size=6, valid_size=2, test_size=2, embargo_size=1, label_horizon=1
+    )
+    correct_train, _valid, _test = correct.split(10)[0]
+    leaky_train, _valid, _test = one_bar_too_short.split(10)[0]
+    assert leaking_position not in correct_train.tolist()
+    assert leaking_position in leaky_train.tolist()
 
 
 def test_accepts_datetimeindex_like_int() -> None:
