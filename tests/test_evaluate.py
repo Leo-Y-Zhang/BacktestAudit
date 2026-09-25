@@ -127,6 +127,39 @@ def test_constant_training_predictions_skip_the_fold() -> None:
     assert verdict.n_periods == 200
 
 
+def test_a_blank_training_prediction_does_not_discard_the_fold() -> None:
+    """Non-finite predictions are not evidence, and must not erase the evidence beside them.
+
+    Each fold standardised the signal with ``np.mean``/``np.std`` over its
+    training predictions, so one NaN there made the mean NaN, turned every
+    test-bar return of that fold into NaN, and those finite test bars then
+    dropped out of the verdict as "non-finite". Measured before the fix: a
+    20-bar NaN warm-up (what a 20-bar rolling signal produces) silently threw
+    away the first fold's 200 out-of-sample bars, and a single blank cell in
+    the middle of the series threw away the second fold's.
+    """
+    from backtestaudit.crossval import PurgedWalkForwardSplitter
+
+    rng = np.random.default_rng(3)
+    n = 1000
+    targets = 0.01 * rng.standard_normal(n)
+    predictions = targets + 0.02 * rng.standard_normal(n)
+    splitter = PurgedWalkForwardSplitter(
+        train_size=400, valid_size=200, test_size=200, embargo_size=1, label_horizon=1
+    )
+
+    def oos_periods(preds: np.ndarray) -> int:
+        return evaluate(targets, predictions=preds, targets=targets, splitter=splitter).n_periods
+
+    assert oos_periods(predictions) == 400  # control: two folds of 200 test bars
+    warm_up = predictions.copy()
+    warm_up[:20] = np.nan  # inside the first fold's training window only
+    assert oos_periods(warm_up) == 400
+    blank = predictions.copy()
+    blank[450] = np.nan  # inside the second fold's training window only
+    assert oos_periods(blank) == 400
+
+
 def test_predictions_targets_noise_signal_oos_flat() -> None:
     rng = np.random.default_rng(78)
     predictions = rng.standard_normal(900)

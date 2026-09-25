@@ -184,7 +184,8 @@ def _walk_forward_oos(
     """Honest out-of-sample evaluation of a per-period signal.
 
     On each fold the signal is standardised using *training* statistics only
-    (no look-ahead), then applied to the held-out test bars; the per-bar OOS
+    (no look-ahead) -- the mean and std of the fold's finite training
+    predictions -- then applied to the held-out test bars; the per-bar OOS
     "strategy return" is ``z_test * target_test``. OOS information coefficients
     (prediction vs target correlation on the test block) are averaged across
     folds. Returns ``None`` if no usable fold survives purging.
@@ -197,11 +198,15 @@ def _walk_forward_oos(
     oos_returns: list[npt.NDArray[np.floating[Any]]] = []
     ics: list[float] = []
     for train_idx, _valid_idx, test_idx in splitter.split(preds.size):
+        # Non-finite predictions are not evidence, but one NaN in the window
+        # must not make the fold's mean NaN: that turned every test-bar return
+        # of the fold into NaN, silently discarding its finite OOS evidence.
         train_p = preds[train_idx]
-        mu = float(np.mean(train_p))
+        train_p = train_p[np.isfinite(train_p)]
         sd = _sample_std(train_p)
         if sd <= 0.0:
             continue
+        mu = float(np.mean(train_p))
         z = (preds[test_idx] - mu) / sd
         oos_returns.append(z * tgts[test_idx])
         ics.append(information_coefficient(preds[test_idx], tgts[test_idx]))

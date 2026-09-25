@@ -35,6 +35,12 @@ All notable changes to this project are documented here. The format is based on
   and treated as zero variance wherever the library divides by a std: the
   Sharpe ratio, the PSR/DSR moments, the effective-trials column screen and the
   walk-forward signal standardisation.
+- One non-finite prediction in a walk-forward training window discarded that
+  fold's entire out-of-sample block: the fold's mean became NaN, every test-bar
+  return became NaN, and those bars then dropped out as non-finite. A 20-bar
+  NaN warm-up halved a two-fold OOS series from 400 to 200 observations with
+  nothing in the verdict saying so. Folds now standardise on their finite
+  training predictions.
 
 ## [0.3.0] - 2026-07-31
 
