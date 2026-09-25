@@ -78,6 +78,13 @@ def test_annualized_sharpe_rejects_bad_periods() -> None:
         annualized_sharpe([0.01, 0.02, 0.03], 0)
 
 
+@pytest.mark.parametrize("periods_per_year", [float("nan"), float("inf")])
+def test_annualized_sharpe_rejects_non_finite_periods(periods_per_year: float) -> None:
+    # A NaN factor slipped past `periods_per_year <= 0` and returned a NaN Sharpe.
+    with pytest.raises(ValueError, match="periods_per_year"):
+        annualized_sharpe([0.01, 0.02, 0.03], periods_per_year)
+
+
 def test_max_drawdown_known() -> None:
     # +10% then -50% -> equity 1.1 then 0.55; peak 1.1; drawdown = 1 - 0.55/1.1 = 0.5
     assert max_drawdown([0.10, -0.50]) == pytest.approx(0.5)

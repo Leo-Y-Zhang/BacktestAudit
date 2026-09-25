@@ -60,7 +60,8 @@ class Thresholds:
 
     These are *policy*, not published constants -- expose and tune them per desk.
     The defaults are intentionally demanding (a ``0.95`` deflated-Sharpe bar
-    mirrors the conventional 5% significance level).
+    mirrors the conventional 5% significance level). A NaN threshold raises
+    ``ValueError``.
     """
 
     min_deflated_sharpe: float = 0.95
@@ -69,6 +70,14 @@ class Thresholds:
     """Minimum annualised, net-of-cost Sharpe ratio."""
     max_pbo: float = 0.5
     """Maximum tolerated Probability of Backtest Overfitting."""
+
+    def __post_init__(self) -> None:
+        # Every gate is a comparison against one of these, and every comparison
+        # with NaN is False: a NaN bar would switch its gate off (`sharpe <= nan`
+        # never fails) rather than reject anything. Refuse it instead.
+        for name in ("min_deflated_sharpe", "min_sharpe", "max_pbo"):
+            if math.isnan(getattr(self, name)):
+                raise ValueError(f"Thresholds.{name} must be a number, not NaN")
 
 
 @dataclass(frozen=True)
@@ -331,8 +340,10 @@ def evaluate(
     Verdict
         Typed result with ``deployable``, ``classification`` and ``reasons``.
     """
-    if periods_per_year <= 0:
-        raise ValueError("periods_per_year must be > 0")
+    if not math.isfinite(periods_per_year) or periods_per_year <= 0:
+        # A NaN factor passes a bare `<= 0`, makes the Sharpe NaN, and a NaN
+        # Sharpe can never fail the `sharpe <= min_sharpe` gate.
+        raise ValueError("periods_per_year must be a finite number > 0")
     if (predictions is None) != (targets is None):
         # Half a pair is still a request to be judged out of sample, and the
         # walk-forward cannot be built from one side of it. Falling through

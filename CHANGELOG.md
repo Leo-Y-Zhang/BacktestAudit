@@ -41,6 +41,13 @@ All notable changes to this project are documented here. The format is based on
   NaN warm-up halved a two-fold OOS series from 400 to 200 observations with
   nothing in the verdict saying so. Folds now standardise on their finite
   training predictions.
+- A `NaN` threshold switched its gate off instead of rejecting anything: every
+  gate is a comparison, and a comparison with `NaN` is false, so a record that
+  fails the Sharpe bar came back DEPLOYABLE under `Thresholds(min_sharpe=nan)`
+  (exit 0 with `--min-sharpe nan`). A `NaN` `periods_per_year` did the same
+  through a `NaN` annualised Sharpe. `Thresholds` now refuses `NaN`,
+  `evaluate()` and `annualized_sharpe()` refuse a non-finite
+  `periods_per_year`, and the CLI reports either as an input error (exit 2).
 
 ## [0.3.0] - 2026-07-31
 

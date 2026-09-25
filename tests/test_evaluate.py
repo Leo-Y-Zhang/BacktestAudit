@@ -200,6 +200,37 @@ def test_bad_periods_per_year_raises() -> None:
         evaluate([0.01, 0.02, 0.03, 0.04], periods_per_year=0)
 
 
+@pytest.mark.parametrize("periods_per_year", [float("nan"), float("inf")])
+def test_non_finite_periods_per_year_raises(periods_per_year: float) -> None:
+    """``periods_per_year <= 0`` is False for NaN, so NaN got past the guard.
+
+    The annualised Sharpe then came out NaN, the Sharpe gate
+    (``sharpe <= min_sharpe``) could never fail, and this record -- rejected on
+    the Sharpe bar at 252 periods a year -- came back DEPLOYABLE. An infinite
+    factor turned every positive Sharpe into an infinite one.
+    """
+    rng = np.random.default_rng(0)
+    returns = 0.0003 + 0.01 * rng.standard_normal(20000)
+    assert not evaluate(returns).deployable  # control: fails the Sharpe bar only
+    with pytest.raises(ValueError, match="periods_per_year"):
+        evaluate(returns, periods_per_year=periods_per_year)
+
+
+@pytest.mark.parametrize("field", ["min_deflated_sharpe", "min_sharpe", "max_pbo"])
+def test_a_nan_threshold_is_refused_not_read_as_no_bar(field: str) -> None:
+    """Each gate is a comparison against its threshold, and NaN compares False.
+
+    Measured before the guard: the record in the test above (annualised Sharpe
+    0.57, deflated Sharpe 1.000) is NOT_DEPLOYABLE on the default policy but
+    DEPLOYABLE with ``Thresholds(min_sharpe=nan)``, because ``sharpe <= nan``
+    never fails; a NaN ``max_pbo`` switched the PBO gate off the same way, and a
+    NaN ``min_deflated_sharpe`` raised from inside MinTRL with a message about
+    ``confidence``. A missing bar must be refused, not read as no bar.
+    """
+    with pytest.raises(ValueError, match=field):
+        Thresholds(**{field: float("nan")})
+
+
 # ── threshold boundaries: an equality case must not slip through as a pass ────
 #
 # Mutation testing (audit/mutants/BacktestAudit.md) found that every gate in

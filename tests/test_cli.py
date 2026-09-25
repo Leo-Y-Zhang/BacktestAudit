@@ -207,6 +207,21 @@ def test_cli_rejects_non_positive_trials(
     assert "--trials" in capsys.readouterr().err
 
 
+def test_cli_nan_threshold_is_an_input_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """argparse's float accepts "nan", and a NaN bar switched its gate off: this
+    record fails the Sharpe bar (exit 1) but exited 0 with ``--min-sharpe nan``."""
+    rng = np.random.default_rng(0)
+    returns = 0.0003 + 0.01 * rng.standard_normal(20000)
+    csv = tmp_path / "modest.csv"
+    _write_returns(csv, returns.reshape(-1, 1), ["strategy"])
+    assert main([str(csv)]) == 1  # control
+    capsys.readouterr()
+    assert main([str(csv), "--min-sharpe", "nan"]) == 2
+    assert "min_sharpe" in capsys.readouterr().err
+
+
 def test_cli_on_packaged_sample(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert _SAMPLE_CSV.exists(), "examples/sample_returns.csv should ship with the package"
     report = tmp_path / "sample.html"

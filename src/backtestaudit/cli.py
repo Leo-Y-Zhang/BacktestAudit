@@ -257,12 +257,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    thresholds = Thresholds(
-        min_deflated_sharpe=args.min_deflated_sharpe,
-        min_sharpe=args.min_sharpe,
-        max_pbo=args.max_pbo,
-    )
     try:
+        thresholds = Thresholds(
+            min_deflated_sharpe=args.min_deflated_sharpe,
+            min_sharpe=args.min_sharpe,
+            max_pbo=args.max_pbo,
+        )
         verdict = evaluate(
             data,
             n_trials=args.n_trials,

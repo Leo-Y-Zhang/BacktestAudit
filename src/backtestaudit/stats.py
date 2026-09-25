@@ -144,8 +144,9 @@ def sharpe_ratio(returns: npt.ArrayLike) -> float:
 
 def annualized_sharpe(returns: npt.ArrayLike, periods_per_year: int = 252) -> float:
     """Annualised Sharpe ratio = per-period Sharpe * ``sqrt(periods_per_year)``."""
-    if periods_per_year <= 0:
-        raise ValueError("periods_per_year must be > 0")
+    # `<= 0` alone is False for NaN, which would return a NaN Sharpe.
+    if not math.isfinite(periods_per_year) or periods_per_year <= 0:
+        raise ValueError("periods_per_year must be a finite number > 0")
     return float(sharpe_ratio(returns) * math.sqrt(periods_per_year))
 
 

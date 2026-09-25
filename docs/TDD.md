@@ -40,6 +40,7 @@ the design rather than an appendix to it.
 | Walk-forward CV yields no usable fold after purging | the caller | `_walk_forward_oos` returns `None` | verdict fails closed with a reason saying every figure shown is in-sample and is *not* evidence about held-out performance |
 | A supplied CSV column is a row counter, index, date or price level | the caller | `_not_returns_reason`: strictly monotone over ≥ 8 finite steps, or a magnitude above 10.0 | column dropped with a note to stderr; if nothing survives, exit 2 telling the user to name the column with `--column` |
 | `--trials 0` or a negative typo | the caller | `_positive_int` argparse type | usage error, exit 2. Previously it floored to 1 downstream, which both disabled deflation and silently switched off the matrix-measured benchmark |
+| A threshold or `periods_per_year` is `NaN` | the caller | `Thresholds.__post_init__` and `evaluate`'s argument check; every gate is a comparison, and a comparison with `NaN` is false, so a `NaN` bar would switch its gate off rather than reject anything | `ValueError`, exit 2 through the CLI |
 | Confidence bar set to 1.0 | the caller | `Phi^-1(1)` is infinite | MinTRL `inf` with a reason naming the bar, distinct from the "Sharpe below benchmark" case |
 | Report path unwritable | the caller | `OSError` around `write_report` | exit 2 after the verdict has already printed |
 
@@ -101,7 +102,7 @@ evaluate(
     predictions=None, targets=None,# optional paired signal + forward returns
     *,
     n_trials: int | None = None,   # None => inferred; explicit => raw-count deflation
-    periods_per_year: int = 252,   # must be > 0
+    periods_per_year: int = 252,   # finite and > 0
     thresholds: Thresholds | None = None,
     pbo_splits: int = 16,          # CSCV blocks, forced even and >= 2
     splitter: PurgedWalkForwardSplitter | None = None,
@@ -146,7 +147,7 @@ it with `degenerate_value=1.0` so an unrankable matrix is rejected.
 |---|---|
 | `0` | verdict is `DEPLOYABLE`; also `--about` and `--version` |
 | `1` | any other verdict — the CI-gate signal |
-| `2` | input could not be read or judged: missing/unreadable file, unparseable CSV, no numeric column, named column absent, no column that could be returns, `ValueError` from `evaluate`, or the report file could not be written; also argparse usage errors |
+| `2` | input could not be read or judged: missing/unreadable file, unparseable CSV, no numeric column, named column absent, no column that could be returns, a `NaN` threshold, `ValueError` from `evaluate`, or the report file could not be written; also argparse usage errors |
 
 Stdout carries the verdict, or the JSON. The report-written confirmation and the
 ignored-columns note go to **stderr**, so `--json --report` still emits parseable
