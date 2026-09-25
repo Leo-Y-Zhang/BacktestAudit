@@ -25,6 +25,7 @@ import numpy.typing as npt
 
 from .crossval import PurgedWalkForwardSplitter, default_walk_forward_splitter
 from .stats import (
+    _sample_std,
     annualized_sharpe,
     cluster_trials,
     cross_trial_sharpe_std,
@@ -198,7 +199,7 @@ def _walk_forward_oos(
     for train_idx, _valid_idx, test_idx in splitter.split(preds.size):
         train_p = preds[train_idx]
         mu = float(np.mean(train_p))
-        sd = float(np.std(train_p, ddof=1))
+        sd = _sample_std(train_p)
         if sd <= 0.0:
             continue
         z = (preds[test_idx] - mu) / sd

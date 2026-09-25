@@ -80,6 +80,21 @@ def _clean(returns: npt.ArrayLike) -> FloatArray:
     return finite
 
 
+def _sample_std(r: FloatArray) -> float:
+    """Sample standard deviation (``ddof=1``), exactly ``0.0`` for constant data.
+
+    ``np.std`` of identical values is not reliably zero: the mean of repeated
+    copies of a value binary floating point cannot represent exactly (0.0004,
+    0.1) can land an ulp away from it, leaving a residue near 1e-19. Divided
+    into a mean, that residue reported a flat series as a Sharpe near 1e16,
+    and PSR/DSR as certainty of an edge. Constant data has zero variance, so
+    it is tested for directly rather than inferred from the rounded std.
+    """
+    if r.size < 2 or bool(np.all(r == r[0])):
+        return 0.0
+    return float(np.std(r, ddof=1))
+
+
 def _sharpe_moments(returns: npt.ArrayLike) -> tuple[int, float, float] | None:
     """Return ``(T, SR, sigma_SR)`` or ``None`` for degenerate input.
 
@@ -95,7 +110,7 @@ def _sharpe_moments(returns: npt.ArrayLike) -> tuple[int, float, float] | None:
     T = int(r.size)
     if T < _MIN_OBS:
         return None
-    sd = float(np.std(r, ddof=1))
+    sd = _sample_std(r)
     if sd <= 0.0:
         return None
     SR = float(np.mean(r) / sd)
@@ -121,7 +136,7 @@ def sharpe_ratio(returns: npt.ArrayLike) -> float:
     r = _clean(returns)
     if r.size < 2:
         return 0.0
-    sd = float(np.std(r, ddof=1))
+    sd = _sample_std(r)
     if sd <= 0.0:
         return 0.0
     return float(np.mean(r) / sd)
@@ -514,7 +529,7 @@ def _prepared_trials(trials: npt.ArrayLike) -> tuple[FloatArray, list[int]] | No
     sub = sub[np.all(np.isfinite(sub), axis=1)]
     if sub.shape[0] < _MIN_CLUSTER_OBS:
         return None
-    keep = np.std(sub, axis=0, ddof=1) > 0.0
+    keep = np.any(sub != sub[0], axis=0)  # not constant (see _sample_std)
     if int(np.count_nonzero(keep)) < 2:
         return None
     if not bool(np.all(keep)):

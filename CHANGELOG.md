@@ -25,6 +25,16 @@ All notable changes to this project are documented here. The format is based on
   Half a pair now raises `ValueError` (exit code 2 through the CLI), matching
   the existing refusal when no walk-forward fold survives purging.
 - The README's test count said 157; the suite is 166.
+- A constant return series was certified DEPLOYABLE. Zero variance was
+  inferred from the rounded `np.std`, but the std of a repeated value that
+  binary floating point cannot represent exactly (0.0004, 0.1) is a ~1e-19
+  residue, not 0: `evaluate(np.full(500, 0.0004))` reported an annualised
+  Sharpe of 5.9e16, a deflated Sharpe of 1.000 and DEPLOYABLE (exit 0 through
+  the CLI), and in a candidate matrix a flat column out-ranked every real
+  configuration and was the one judged. Constant data is now detected directly
+  and treated as zero variance wherever the library divides by a std: the
+  Sharpe ratio, the PSR/DSR moments, the effective-trials column screen and the
+  walk-forward signal standardisation.
 
 ## [0.3.0] - 2026-07-31
 

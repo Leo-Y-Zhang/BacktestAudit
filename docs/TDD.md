@@ -32,7 +32,7 @@ the design rather than an appendix to it.
 
 | What breaks | Who notices | How it is detected | How it is undone |
 |---|---|---|---|
-| Fewer than 4 finite observations, or zero variance | the caller | `_sharpe_moments` returns `None`; PSR/DSR collapse to `0.0`, `sharpe_standard_error` to `inf`, MinTRL to `inf` | rejection with an explicit "record is too degenerate to measure" reason |
+| Fewer than 4 finite observations, or zero variance | the caller | `_sharpe_moments` returns `None`; PSR/DSR collapse to `0.0`, `sharpe_standard_error` to `inf`, MinTRL to `inf`. Zero variance means every value identical, tested directly by `_sample_std`: the rounded `np.std` of a repeated 0.0004 is ~1e-19, not 0 | rejection with an explicit "record is too degenerate to measure" reason |
 | Extreme skew/kurtosis drives the estimator variance non-positive or `NaN` | the caller | same guard — the check demands finite *and* positive, because a bare `<= 0` lets `NaN` through | same |
 | Candidate matrix unrankable (`N < 2`, `T < 4`, no usable partition) | the caller | PBO returns `degenerate_value`, which `evaluate` sets to `1.0` | PBO gate fails; verdict is `PROBABLY_OVERFIT` |
 | Matrix too short to measure a search (`< 100` complete rows, or rows ≤ columns) | the caller, via `effective_trials` being `None` | `cluster_trials` declines | falls back to the published raw-count deflation — never a *weaker* assumed search |

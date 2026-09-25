@@ -53,6 +53,26 @@ def test_sharpe_degenerate_is_zero() -> None:
     assert annualized_sharpe([]) == 0.0
 
 
+@pytest.mark.parametrize(("value", "n"), [(0.0004, 500), (0.1, 252), (0.01, 200)])
+def test_constant_series_is_zero_variance_not_rounding_noise(value: float, n: int) -> None:
+    """A constant series has zero variance whatever float rounding says.
+
+    None of these values is exactly representable in binary, so the mean of
+    ``n`` copies lands an ulp away from the value and ``np.std`` returns a
+    residue near 1e-19 instead of 0. Divided into the mean, that residue gave
+    a per-period Sharpe near 4e15; scipy's skew and kurtosis stayed finite on
+    the same input, so the moments guard passed it too and PSR and DSR both
+    returned 1.0 -- certainty of an edge on a record with no risk at all.
+    """
+    r = np.full(n, value)
+    assert sharpe_ratio(r) == 0.0
+    assert annualized_sharpe(r) == 0.0
+    assert probabilistic_sharpe_ratio(r, 0.0) == 0.0
+    assert deflated_sharpe_ratio(r, 10) == 0.0
+    assert math.isinf(sharpe_standard_error(r))
+    assert math.isinf(minimum_track_record_length(r, 0.0))
+
+
 def test_annualized_sharpe_rejects_bad_periods() -> None:
     with pytest.raises(ValueError):
         annualized_sharpe([0.01, 0.02, 0.03], 0)
@@ -509,6 +529,23 @@ def test_cluster_trials_non_finite_rows_are_not_evidence() -> None:
     noisy[100, 7] = np.inf
     noisy[200, 11] = -np.inf
     assert cluster_trials(noisy) == cluster_trials(perf)
+
+
+def test_cluster_trials_drops_a_column_constant_on_the_complete_rows() -> None:
+    """A column is only usable when it varies on the complete-case rows.
+
+    Column 3 varies overall (so its own Sharpe moments are valid) but is flat
+    on every row the other columns fill in, so correlations against it are
+    taken over rounding noise. The ``std > 0`` screen missed it because the
+    std of repeated 0.0004 is ~5e-20, not 0, and it was counted as a fourth
+    trial.
+    """
+    rng = np.random.default_rng(0)
+    perf = 0.01 * rng.standard_normal((300, 4))
+    perf[:, 3] = 0.0004
+    perf[:20, 3] = 0.01 * rng.standard_normal(20)  # varies only on these rows...
+    perf[:20, 0] = np.nan  # ...which are not complete cases
+    assert sorted(j for cluster in cluster_trials(perf) for j in cluster) == [0, 1, 2]
 
 
 def test_cross_trial_sharpe_std_hand_value() -> None:

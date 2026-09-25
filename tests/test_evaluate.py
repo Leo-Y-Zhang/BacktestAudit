@@ -72,6 +72,61 @@ def test_predictions_targets_genuine_signal_oos_positive() -> None:
     assert verdict.oos_information_coefficient > 0.0
 
 
+def test_constant_returns_are_not_certified_deployable() -> None:
+    """A flat series has no measurable risk, so it cannot show a significant edge.
+
+    Measured before the fix: ``evaluate(np.full(500, 0.0004))`` returned
+    DEPLOYABLE with a deflated Sharpe of 1.000, an annualised Sharpe of 5.9e16
+    and "MinTRL 2 obs needed", because the std of repeated 0.0004 is a ~1e-19
+    rounding residue rather than 0. Through the CLI that is exit code 0 on a
+    CSV holding one repeated number.
+    """
+    verdict = evaluate(np.full(500, 0.0004))
+    assert not verdict.deployable
+    assert verdict.classification == "NOT_DEPLOYABLE"
+    assert verdict.sharpe == 0.0
+    assert verdict.deflated_sharpe == 0.0
+    assert math.isinf(verdict.min_track_record)
+    assert any("too degenerate to measure" in r for r in verdict.reasons), verdict.reasons
+
+
+def test_constant_column_is_not_selected_as_the_best_configuration() -> None:
+    """The judged column is the one with the highest Sharpe; a flat column has none.
+
+    Before the fix the flat column's rounding-residue Sharpe (~1e17 annualised)
+    beat every real configuration, so the verdict judged it instead of the
+    genuine strategy beside it.
+    """
+    rng = np.random.default_rng(42)
+    genuine = 0.0008 + 0.008 * rng.standard_normal(1500)
+    matrix = np.column_stack([genuine, np.full(1500, 0.0004)])
+    verdict = evaluate(matrix)
+    assert verdict.sharpe == pytest.approx(evaluate(genuine).sharpe)
+
+
+def test_constant_training_predictions_skip_the_fold() -> None:
+    """A signal flat across a fold's whole training window cannot be standardised.
+
+    ``_walk_forward_oos`` skips such a fold (``sd <= 0``), but for a flat value
+    binary floating point cannot represent the std was a ~1e-19 residue, the
+    fold was kept, and its test block was divided by that residue -- scaled by
+    ~1e16, swamping every other fold in the combined out-of-sample series.
+    """
+    from backtestaudit.crossval import PurgedWalkForwardSplitter
+
+    rng = np.random.default_rng(3)
+    n = 1000
+    targets = 0.01 * rng.standard_normal(n)
+    predictions = targets + 0.02 * rng.standard_normal(n)
+    predictions[:400] = 0.0004  # flat across the first fold's training window
+    splitter = PurgedWalkForwardSplitter(
+        train_size=400, valid_size=200, test_size=200, embargo_size=1, label_horizon=1
+    )
+    verdict = evaluate(targets, predictions=predictions, targets=targets, splitter=splitter)
+    # Two folds of 200 test bars each; only the second can be standardised.
+    assert verdict.n_periods == 200
+
+
 def test_predictions_targets_noise_signal_oos_flat() -> None:
     rng = np.random.default_rng(78)
     predictions = rng.standard_normal(900)
