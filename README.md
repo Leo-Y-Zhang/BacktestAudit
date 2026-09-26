@@ -59,7 +59,7 @@ installs and runs everything:
 python -m pip install -e ".[dev]" && python -m pytest
 ```
 
-It reports `166 passed` in about 40 seconds. Do not add `-q`: `pyproject.toml`
+It reports `196 passed` in about 40 seconds. Do not add `-q`: `pyproject.toml`
 already sets it, and a second one suppresses the summary line. CI runs the same
 `pytest` plus `python -m ruff check src tests` and `python -m mypy src`
 (strict), both of which the same extra installs. The type-check targets Python
@@ -286,7 +286,7 @@ infinity.
 
 ## Machine-checked invariants
 
-The suite is 166 tests. Most anchor on hand-computed values from the source
+The suite is 196 tests. Most anchor on hand-computed values from the source
 papers; on top of those, a property-based layer
 ([`tests/test_properties.py`](tests/test_properties.py), Hypothesis as a
 dev-only dependency) machine-checks the mathematical contract on arbitrary

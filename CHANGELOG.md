@@ -67,6 +67,7 @@ All notable changes to this project are documented here. The format is based on
   gating on it was waved through. They now raise `ValueError`, as does a
   negative `sigma`, which produced a benchmark below zero. `evaluate()` never
   passed either, so no verdict changes.
+- The README and `docs/TDD.md` still gave the suite as 166 tests; it is 196.
 
 ## [0.3.0] - 2026-07-31
 

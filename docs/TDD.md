@@ -190,19 +190,19 @@ version boundary. The 1-D path is unchanged. Reports stamped `v0.3.0` were
 produced against the measured benchmark and should not be compared directly with
 pre-0.3.0 ones.
 
-## What the 166 tests pin down
+## What the 196 tests pin down
 
-166 tests, `pytest -q`. CI runs `ruff check src tests`, `mypy src` (strict,
+196 tests, `pytest -q`. CI runs `ruff check src tests`, `mypy src` (strict,
 `python_version = 3.12`) and `pytest -q` on Python 3.13, with a 15-minute job
 timeout and a gitleaks job.
 
-**Anchored.** `test_stats.py` (672 lines) pins hand-computed values from the
+**Anchored.** `test_stats.py` (848 lines) pins hand-computed values from the
 source papers, so a refactor that changes a formula fails loudly rather than
 drifting.
 
 **Negative and fail-closed.** Degenerate records, near-constant returns,
 unrankable matrices, the `--trials 0` rejection, the not-returns column screen,
-and the "OOS requested but unavailable" refusal each have a test that would pass
+and the "OOS requested but unavailable" refusal each have a test that would fail
 if the guard were removed and the tool merely got quieter. That is the class of
 regression this suite exists to catch.
 
