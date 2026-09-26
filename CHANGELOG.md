@@ -60,6 +60,13 @@ All notable changes to this project are documented here. The format is based on
   two straight 10% losses returned 0.10 instead of 0.19, and a total loss in
   the first period returned NaN. The starting equity now counts as the first
   peak.
+- `probabilistic_sharpe_ratio()`, `deflated_sharpe_ratio()` and
+  `minimum_track_record_length()` returned `NaN` for a `NaN` `sr_benchmark`,
+  and `expected_max_sharpe_benchmark()` a `NaN` benchmark for a `NaN` `sigma`.
+  A `NaN` probability fails no gate (`dsr < 0.95` is false), so a caller
+  gating on it was waved through. They now raise `ValueError`, as does a
+  negative `sigma`, which produced a benchmark below zero. `evaluate()` never
+  passed either, so no verdict changes.
 
 ## [0.3.0] - 2026-07-31
 

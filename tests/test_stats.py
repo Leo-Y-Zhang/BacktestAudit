@@ -435,6 +435,32 @@ def test_dsr_fail_closed() -> None:
     assert deflated_sharpe_ratio([1.0, 1.0, 1.0, 1.0], 10) == 0.0
 
 
+def test_a_nan_benchmark_is_refused_not_returned_as_a_nan_probability() -> None:
+    # Phi(NaN) is NaN, and a NaN probability passes as well as fails nothing:
+    # `dsr < 0.95` is False for NaN, so a caller gating on it is waved through.
+    # A NaN benchmark or dispersion is an input error, refused like a NaN
+    # threshold. Infinite benchmarks keep their meaning (PSR 0 or 1).
+    r = np.array([0.0, 0.0, 0.0, 0.04])
+    nan = float("nan")
+    with pytest.raises(ValueError, match="sr_benchmark"):
+        probabilistic_sharpe_ratio(r, nan)
+    with pytest.raises(ValueError, match="sr_benchmark"):
+        deflated_sharpe_ratio(r, n_trials=10, sr_benchmark=nan)
+    with pytest.raises(ValueError, match="sr_benchmark"):
+        minimum_track_record_length(r, nan)
+    with pytest.raises(ValueError, match="sigma"):
+        expected_max_sharpe_benchmark(nan, 10)
+    with pytest.raises(ValueError, match="sigma"):
+        expected_max_sharpe_benchmark(-0.1, 10)  # a negative dispersion lowers the bar
+    # Refused even when the record itself is degenerate: the argument is wrong
+    # whatever the data.
+    with pytest.raises(ValueError, match="sr_benchmark"):
+        probabilistic_sharpe_ratio([0.01, 0.02], nan)
+    assert probabilistic_sharpe_ratio(r, float("inf")) == 0.0
+    assert probabilistic_sharpe_ratio(r, float("-inf")) == 1.0
+    assert expected_max_sharpe_benchmark(float("inf"), 1) == 0.0
+
+
 # ── PBO via CSCV ──────────────────────────────────────────────────────────────
 
 

@@ -41,6 +41,7 @@ the design rather than an appendix to it.
 | A supplied CSV column is a row counter, index, date or price level | the caller | `_not_returns_reason`: strictly monotone over ≥ 8 finite steps, or a magnitude above 10.0 | column dropped with a note to stderr; if nothing survives, exit 2 telling the user to name the column with `--column` |
 | `--trials 0` or a negative typo (`n_trials < 1` from the library) | the caller | `_positive_int` argparse type; `evaluate`'s argument check | usage error, exit 2; `ValueError` from `evaluate`. Previously it floored to 1 downstream, which both disabled deflation and silently switched off the matrix-measured benchmark |
 | A threshold or `periods_per_year` is `NaN` | the caller | `Thresholds.__post_init__` and `evaluate`'s argument check; every gate is a comparison, and a comparison with `NaN` is false, so a `NaN` bar would switch its gate off rather than reject anything | `ValueError`, exit 2 through the CLI |
+| A `NaN` `sr_benchmark` passed to PSR, DSR or MinTRL, or a `NaN` / negative `sigma` to `expected_max_sharpe_benchmark` | the library caller | `_require_benchmark` and the `sigma` check; `Phi(NaN)` is `NaN`, and a `NaN` probability fails no gate | `ValueError` |
 | Confidence bar set to 1.0 | the caller | `Phi^-1(1)` is infinite | MinTRL `inf` with a reason naming the bar, distinct from the "Sharpe below benchmark" case |
 | Report path unwritable | the caller | `OSError` around `write_report` | exit 2 after the verdict has already printed |
 

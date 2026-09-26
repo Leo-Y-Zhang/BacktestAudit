@@ -95,6 +95,19 @@ def _sample_std(r: FloatArray) -> float:
     return float(np.std(r, ddof=1))
 
 
+def _require_benchmark(sr_benchmark: float) -> float:
+    """``sr_benchmark`` as a float, refusing ``NaN``.
+
+    ``Phi(NaN)`` is ``NaN``, and a ``NaN`` probability fails no gate: every
+    ``prob < bar`` comparison with it is False. An infinite benchmark keeps its
+    meaning (a probability of 0 or 1), so only ``NaN`` is refused.
+    """
+    value = float(sr_benchmark)
+    if math.isnan(value):
+        raise ValueError("sr_benchmark must be a number, not NaN")
+    return value
+
+
 def _sharpe_moments(returns: npt.ArrayLike) -> tuple[int, float, float] | None:
     """Return ``(T, SR, sigma_SR)`` or ``None`` for degenerate input.
 
@@ -257,7 +270,8 @@ def probabilistic_sharpe_ratio(returns: npt.ArrayLike, sr_benchmark: float = 0.0
     returns:
         Per-period (NOT annualised) returns. Non-finite entries are dropped.
     sr_benchmark:
-        Per-period Sharpe to test against (``SR*``). Defaults to ``0.0``.
+        Per-period Sharpe to test against (``SR*``). Defaults to ``0.0``;
+        ``NaN`` raises ``ValueError``.
 
     Returns
     -------
@@ -265,12 +279,18 @@ def probabilistic_sharpe_ratio(returns: npt.ArrayLike, sr_benchmark: float = 0.0
         Probability in ``[0, 1]``; ``0.0`` (fail-closed) on degenerate input
         (fewer than four observations, zero variance, or non-positive estimator
         variance from extreme skew/kurtosis).
+
+    Raises
+    ------
+    ValueError
+        If ``sr_benchmark`` is ``NaN``.
     """
+    benchmark = _require_benchmark(sr_benchmark)
     moments = _sharpe_moments(returns)
     if moments is None:
         return 0.0
     _T, SR, sigma = moments
-    return float(norm.cdf((SR - float(sr_benchmark)) / sigma))
+    return float(norm.cdf((SR - benchmark) / sigma))
 
 
 def expected_max_sharpe_benchmark(sigma: float, n_trials: int) -> float:
@@ -298,7 +318,13 @@ def expected_max_sharpe_benchmark(sigma: float, n_trials: int) -> float:
     & Lopez de Prado, 2014). Supplying a ``T x N`` candidate matrix to
     :func:`backtestaudit.evaluate.evaluate` lets the search be measured directly
     (via PBO) rather than only approximated here.
+
+    ``sigma`` may be ``inf`` (a degenerate record's standard error); a ``NaN``
+    or negative ``sigma`` raises ``ValueError``, since either would return a
+    benchmark that is meaningless or *below* zero, lowering the bar.
     """
+    if math.isnan(sigma) or sigma < 0.0:
+        raise ValueError(f"sigma must be a non-negative number (got {sigma})")
     n = max(int(n_trials), 1)
     if n <= 1:
         return 0.0
@@ -337,7 +363,14 @@ def deflated_sharpe_ratio(
     float
         Probability in ``[0, 1]``; ``0.0`` (fail-closed) on degenerate input.
         A common "significant" cutoff is ``DSR >= 0.95``.
+
+    Raises
+    ------
+    ValueError
+        If ``sr_benchmark`` is ``NaN``.
     """
+    if sr_benchmark is not None:
+        sr_benchmark = _require_benchmark(sr_benchmark)
     moments = _sharpe_moments(returns)
     if moments is None:
         return 0.0
@@ -383,7 +416,8 @@ def minimum_track_record_length(
     returns:
         Per-period (NOT annualised) returns. Non-finite entries are dropped.
     sr_benchmark:
-        Per-period Sharpe to test against (``SR*``). Defaults to ``0.0``.
+        Per-period Sharpe to test against (``SR*``). Defaults to ``0.0``;
+        ``NaN`` raises ``ValueError``.
     confidence:
         Required PSR level, strictly inside ``(0, 1)``; ``0.95`` mirrors the
         conventional 5% significance level.
@@ -399,11 +433,12 @@ def minimum_track_record_length(
     """
     if not 0.0 < confidence < 1.0:
         raise ValueError("confidence must be strictly between 0 and 1")
+    benchmark = _require_benchmark(sr_benchmark)
     moments = _sharpe_moments(returns)
     if moments is None:
         return float("inf")
     T, SR, sigma = moments
-    excess = SR - float(sr_benchmark)
+    excess = SR - benchmark
     if excess <= 0.0:
         return float("inf")
     variance_numerator = sigma * sigma * (T - 1)  # 1 - g3*SR + (g4 - 1)/4 * SR^2
