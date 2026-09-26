@@ -154,6 +154,26 @@ def test_psr_hand_computed_value() -> None:
     assert probabilistic_sharpe_ratio(r, 0.0) == pytest.approx(0.996000, abs=1e-4)
 
 
+def test_psr_hand_computed_value_with_skew() -> None:
+    # returns 0, 0, 0, 0.04: mean 0.01, sample std 0.02, SR = 0.5. Central
+    # moments m2 = 3e-4, m3 = 6e-6, m4 = 2.1e-7, so the biased skew is
+    # g3 = m3 / m2^1.5 = 2 / sqrt(3) and the non-excess kurtosis is
+    # g4 = m4 / m2^2 = 7 / 3. Then
+    #   sr_var = (1 - g3*SR + (g4 - 1)/4 * SR^2) / (T - 1)
+    #          = (1 - 1/sqrt(3) + 1/12) / 3 = 0.1686610,
+    # sigma = 0.4106836 and PSR(0) = Phi(0.5 / sigma) = Phi(1.2174823) = 0.888290.
+    # The test above has zero skew, so it cannot see the sign of the skew
+    # term, the biased-vs-unbiased skew choice, or a dropped skew term; each
+    # of those moves this value.
+    r = np.array([0.0, 0.0, 0.0, 0.04])
+    sr_var = (13.0 / 12.0 - 1.0 / math.sqrt(3.0)) / 3.0
+    assert sr_var == pytest.approx(0.1686610, abs=1e-7)  # anchor the arithmetic
+    assert sharpe_standard_error(r) == pytest.approx(math.sqrt(sr_var), rel=1e-9)
+    assert probabilistic_sharpe_ratio(r, 0.0) == pytest.approx(0.888290, abs=1e-6)
+    # Against a benchmark of 0.25: Phi(0.25 / sigma) = Phi(0.6087411) = 0.728652.
+    assert probabilistic_sharpe_ratio(r, 0.25) == pytest.approx(0.728652, abs=1e-6)
+
+
 def test_psr_decreasing_in_benchmark() -> None:
     r = np.array([0.01, 0.02, 0.03, 0.04])
     assert probabilistic_sharpe_ratio(r, 0.0) > probabilistic_sharpe_ratio(r, 1.0)
@@ -393,6 +413,23 @@ def test_dsr_explicit_benchmark_overrides_trials() -> None:
     assert a == pytest.approx(b)
 
 
+def test_dsr_hand_computed_value() -> None:
+    # Same record as the skewed PSR test: SR = 0.5, sigma = 0.4106836. For
+    # N = 10 trials the expected-maximum factor is
+    #   (1 - gamma) * Z^-1(0.9) + gamma * Z^-1(1 - 1/(10 e))
+    #   = 0.4227843 * 1.2815516 + 0.5772157 * 1.7887716 = 1.5745983,
+    # so SR* = sigma * 1.5745983 = 0.6466617 and
+    # DSR = Phi((SR - SR*) / sigma) = Phi(1.2174823 - 1.5745983) = Phi(-0.3571160)
+    #     = 0.360502. The observed Sharpe is below the benchmark, so the
+    # deflated probability falls under one half although PSR(0) is 0.888.
+    r = np.array([0.0, 0.0, 0.0, 0.04])
+    factor = (1.0 - EULER_MASCHERONI) * float(norm.ppf(0.9)) + EULER_MASCHERONI * float(
+        norm.ppf(1.0 - 1.0 / (10.0 * math.e))
+    )
+    assert factor == pytest.approx(1.5745983, abs=1e-7)
+    assert deflated_sharpe_ratio(r, n_trials=10) == pytest.approx(0.360502, abs=1e-6)
+
+
 def test_dsr_fail_closed() -> None:
     assert deflated_sharpe_ratio([0.01, 0.02, 0.03], 10) == 0.0
     assert deflated_sharpe_ratio([1.0, 1.0, 1.0, 1.0], 10) == 0.0
@@ -481,6 +518,31 @@ def test_pbo_hand_computed_exact_median_tie_counts_as_overfit() -> None:
         ]
     )
     assert probability_of_backtest_overfitting(M, n_splits=2) == pytest.approx(1.0)
+
+
+def test_pbo_hand_computed_one_partition_each_side() -> None:
+    """One CSCV partition lands in the worse OOS half and one in the better.
+
+    ``n_splits=2`` with ``N = 4`` columns, block sums (rows 0-1, rows 2-3):
+    ``A = [3, 4, 1, 2]`` and ``B = [4, 1, 0, 3]``.
+
+    Partition IS = A: best is column 1, whose OOS (B) sum 1 ranks 2 of 4
+    (only column 2 is lower), so ``w = 2/5``, ``logit = ln(2/3) < 0`` --
+    overfit. Partition IS = B: best is column 0, whose OOS (A) sum 3 ranks
+    3 of 4, so ``w = 3/5``, ``logit = ln(3/2) > 0`` -- not overfit.
+
+    PBO is the fraction with ``logit <= 0``: exactly 1/2. (Selecting the IS
+    *worst* column instead would give 1.0.)
+    """
+    M = np.array(
+        [
+            [1.0, 2.0, 0.0, 1.0],
+            [2.0, 2.0, 1.0, 1.0],
+            [2.0, 0.0, 0.0, 1.0],
+            [2.0, 1.0, 0.0, 2.0],
+        ]
+    )
+    assert probability_of_backtest_overfitting(M, n_splits=2) == pytest.approx(0.5)
 
 
 # ── effective trials via correlation clustering (Lopez de Prado & Lewis 2019) ─
