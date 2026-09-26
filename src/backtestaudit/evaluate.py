@@ -325,6 +325,7 @@ def evaluate(
         Defaults to ``N`` for a candidate matrix, else ``1``. Supplying it for
         a matrix asserts the search was *not* just the matrix, so the published
         raw-count deflation is applied instead of the matrix-measured one.
+        A value below ``1`` raises ``ValueError``.
     periods_per_year:
         Annualisation factor for the Sharpe ratio (252 trading days by default).
     thresholds:
@@ -344,6 +345,12 @@ def evaluate(
         # A NaN factor passes a bare `<= 0`, makes the Sharpe NaN, and a NaN
         # Sharpe can never fail the `sharpe <= min_sharpe` gate.
         raise ValueError("periods_per_year must be a finite number > 0")
+    if n_trials is not None and n_trials < 1:
+        # Any explicit count routes a matrix to the raw-count deflation, and a
+        # count below 1 is floored to one trial there: no deflation at all, and
+        # the matrix-measured benchmark switched off. The CLI rejects
+        # `--trials 0` for the same reason.
+        raise ValueError(f"n_trials must be >= 1 when given (got {n_trials})")
     if (predictions is None) != (targets is None):
         # Half a pair is still a request to be judged out of sample, and the
         # walk-forward cannot be built from one side of it. Falling through

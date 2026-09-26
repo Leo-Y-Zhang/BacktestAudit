@@ -48,6 +48,12 @@ All notable changes to this project are documented here. The format is based on
   through a `NaN` annualised Sharpe. `Thresholds` now refuses `NaN`,
   `evaluate()` and `annualized_sharpe()` refuse a non-finite
   `periods_per_year`, and the CLI reports either as an input error (exit 2).
+- `evaluate()` accepted `n_trials=0` or a negative count, which the CLI
+  already refuses as `--trials 0`. Any explicit count switches a matrix to the
+  raw-count deflation, where a count below 1 is floored to one trial: the best
+  of 50 pure-noise columns, PROBABLY_OVERFIT by default, came back DEPLOYABLE
+  with `n_trials=0` and reported "Trials assumed: 0". It now raises
+  `ValueError`.
 
 ## [0.3.0] - 2026-07-31
 

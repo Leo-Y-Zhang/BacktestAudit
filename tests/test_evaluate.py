@@ -216,6 +216,23 @@ def test_non_finite_periods_per_year_raises(periods_per_year: float) -> None:
         evaluate(returns, periods_per_year=periods_per_year)
 
 
+@pytest.mark.parametrize("n_trials", [0, -5])
+def test_a_non_positive_trial_count_is_refused(n_trials: int) -> None:
+    """``n_trials`` below 1 is not a search size, and it switched deflation off.
+
+    The CLI already rejects ``--trials 0`` for this reason; the library took it
+    silently. Measured before the guard: the best of 50 pure-noise columns is
+    PROBABLY_OVERFIT on the measured default, but with ``n_trials=0`` (or -5)
+    the explicit count routed to the raw-count path, was floored to one trial,
+    and the same matrix came back DEPLOYABLE with "Trials assumed: 0" (or -5).
+    """
+    rng = np.random.default_rng(0)
+    candidates = 0.01 * rng.standard_normal((750, 50))
+    assert evaluate(candidates).classification == "PROBABLY_OVERFIT"  # control
+    with pytest.raises(ValueError, match="n_trials"):
+        evaluate(candidates, n_trials=n_trials)
+
+
 @pytest.mark.parametrize("field", ["min_deflated_sharpe", "min_sharpe", "max_pbo"])
 def test_a_nan_threshold_is_refused_not_read_as_no_bar(field: str) -> None:
     """Each gate is a comparison against its threshold, and NaN compares False.
