@@ -154,15 +154,16 @@ def max_drawdown(returns: npt.ArrayLike) -> float:
     """Maximum drawdown of the compounded equity curve, as a positive fraction.
 
     ``0.0`` means no drawdown (or insufficient data). The returns are treated as
-    simple per-period returns and compounded as ``cumprod(1 + r)``.
+    simple per-period returns and compounded as ``cumprod(1 + r)`` from a
+    starting equity of ``1.0``, which counts as the first peak: a loss in the
+    opening period is a drawdown like any other.
     """
     r = _clean(returns)
     if r.size == 0:
         return 0.0
     equity = np.cumprod(1.0 + r)
-    peak = np.maximum.accumulate(equity)
-    drawdown = equity / peak - 1.0
-    return float(-np.min(drawdown))
+    peak = np.maximum(np.maximum.accumulate(equity), 1.0)
+    return float(np.max(1.0 - equity / peak))
 
 
 def hit_rate(returns: npt.ArrayLike) -> float:

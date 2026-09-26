@@ -54,6 +54,12 @@ All notable changes to this project are documented here. The format is based on
   of 50 pure-noise columns, PROBABLY_OVERFIT by default, came back DEPLOYABLE
   with `n_trials=0` and reported "Trials assumed: 0". It now raises
   `ValueError`.
+- `max_drawdown()` started its running peak at the first period's closing
+  equity rather than at the starting capital of 1.0, so a loss in the opening
+  period was never measured: `max_drawdown([-0.5])` returned 0.0 (as `-0.0`),
+  two straight 10% losses returned 0.10 instead of 0.19, and a total loss in
+  the first period returned NaN. The starting equity now counts as the first
+  peak.
 
 ## [0.3.0] - 2026-07-31
 

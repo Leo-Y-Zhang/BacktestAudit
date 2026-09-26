@@ -94,6 +94,21 @@ def test_max_drawdown_monotonic_up_is_zero() -> None:
     assert max_drawdown([0.01, 0.02, 0.03]) == pytest.approx(0.0)
 
 
+def test_max_drawdown_counts_losses_from_the_starting_capital() -> None:
+    """The curve starts at 1.0 before the first return, and that is a peak too.
+
+    The running peak used to begin at the first period's closing equity, so a
+    loss in the opening period was never measured: a record that halved in
+    its only period reported no drawdown at all, and two straight 10% losses
+    (equity 0.9 then 0.81) reported 10% instead of 19%. A total loss in the
+    first period divided zero equity by a zero peak and returned NaN.
+    """
+    assert max_drawdown([-0.5]) == pytest.approx(0.5)
+    assert max_drawdown([-1.0, 0.1]) == pytest.approx(1.0)
+    assert max_drawdown([-0.10, -0.10]) == pytest.approx(0.19)
+    assert max_drawdown([-0.10, 0.20, -0.25]) == pytest.approx(1.0 - 0.81 / 1.08)
+
+
 def test_hit_rate() -> None:
     assert hit_rate([1.0, -1.0, 2.0, -3.0]) == pytest.approx(0.5)
     assert hit_rate([]) == 0.0
