@@ -25,6 +25,7 @@ import numpy.typing as npt
 
 from .crossval import PurgedWalkForwardSplitter, default_walk_forward_splitter
 from .stats import (
+    _sample_std,
     annualized_sharpe,
     cluster_trials,
     cross_trial_sharpe_std,
@@ -59,7 +60,8 @@ class Thresholds:
 
     These are *policy*, not published constants -- expose and tune them per desk.
     The defaults are intentionally demanding (a ``0.95`` deflated-Sharpe bar
-    mirrors the conventional 5% significance level).
+    mirrors the conventional 5% significance level). A NaN threshold raises
+    ``ValueError``.
     """
 
     min_deflated_sharpe: float = 0.95
@@ -68,6 +70,14 @@ class Thresholds:
     """Minimum annualised, net-of-cost Sharpe ratio."""
     max_pbo: float = 0.5
     """Maximum tolerated Probability of Backtest Overfitting."""
+
+    def __post_init__(self) -> None:
+        # Every gate is a comparison against one of these, and every comparison
+        # with NaN is False: a NaN bar would switch its gate off (`sharpe <= nan`
+        # never fails) rather than reject anything. Refuse it instead.
+        for name in ("min_deflated_sharpe", "min_sharpe", "max_pbo"):
+            if math.isnan(getattr(self, name)):
+                raise ValueError(f"Thresholds.{name} must be a number, not NaN")
 
 
 @dataclass(frozen=True)
@@ -183,7 +193,8 @@ def _walk_forward_oos(
     """Honest out-of-sample evaluation of a per-period signal.
 
     On each fold the signal is standardised using *training* statistics only
-    (no look-ahead), then applied to the held-out test bars; the per-bar OOS
+    (no look-ahead) -- the mean and std of the fold's finite training
+    predictions -- then applied to the held-out test bars; the per-bar OOS
     "strategy return" is ``z_test * target_test``. OOS information coefficients
     (prediction vs target correlation on the test block) are averaged across
     folds. Returns ``None`` if no usable fold survives purging.
@@ -196,11 +207,15 @@ def _walk_forward_oos(
     oos_returns: list[npt.NDArray[np.floating[Any]]] = []
     ics: list[float] = []
     for train_idx, _valid_idx, test_idx in splitter.split(preds.size):
+        # Non-finite predictions are not evidence, but one NaN in the window
+        # must not make the fold's mean NaN: that turned every test-bar return
+        # of the fold into NaN, silently discarding its finite OOS evidence.
         train_p = preds[train_idx]
-        mu = float(np.mean(train_p))
-        sd = float(np.std(train_p, ddof=1))
+        train_p = train_p[np.isfinite(train_p)]
+        sd = _sample_std(train_p)
         if sd <= 0.0:
             continue
+        mu = float(np.mean(train_p))
         z = (preds[test_idx] - mu) / sd
         oos_returns.append(z * tgts[test_idx])
         ics.append(information_coefficient(preds[test_idx], tgts[test_idx]))
@@ -310,6 +325,7 @@ def evaluate(
         Defaults to ``N`` for a candidate matrix, else ``1``. Supplying it for
         a matrix asserts the search was *not* just the matrix, so the published
         raw-count deflation is applied instead of the matrix-measured one.
+        A value below ``1`` raises ``ValueError``.
     periods_per_year:
         Annualisation factor for the Sharpe ratio (252 trading days by default).
     thresholds:
@@ -325,8 +341,16 @@ def evaluate(
     Verdict
         Typed result with ``deployable``, ``classification`` and ``reasons``.
     """
-    if periods_per_year <= 0:
-        raise ValueError("periods_per_year must be > 0")
+    if not math.isfinite(periods_per_year) or periods_per_year <= 0:
+        # A NaN factor passes a bare `<= 0`, makes the Sharpe NaN, and a NaN
+        # Sharpe can never fail the `sharpe <= min_sharpe` gate.
+        raise ValueError("periods_per_year must be a finite number > 0")
+    if n_trials is not None and n_trials < 1:
+        # Any explicit count routes a matrix to the raw-count deflation, and a
+        # count below 1 is floored to one trial there: no deflation at all, and
+        # the matrix-measured benchmark switched off. The CLI rejects
+        # `--trials 0` for the same reason.
+        raise ValueError(f"n_trials must be >= 1 when given (got {n_trials})")
     if (predictions is None) != (targets is None):
         # Half a pair is still a request to be judged out of sample, and the
         # walk-forward cannot be built from one side of it. Falling through

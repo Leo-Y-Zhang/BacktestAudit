@@ -25,6 +25,49 @@ All notable changes to this project are documented here. The format is based on
   Half a pair now raises `ValueError` (exit code 2 through the CLI), matching
   the existing refusal when no walk-forward fold survives purging.
 - The README's test count said 157; the suite is 166.
+- A constant return series was certified DEPLOYABLE. Zero variance was
+  inferred from the rounded `np.std`, but the std of a repeated value that
+  binary floating point cannot represent exactly (0.0004, 0.1) is a ~1e-19
+  residue, not 0: `evaluate(np.full(500, 0.0004))` reported an annualised
+  Sharpe of 5.9e16, a deflated Sharpe of 1.000 and DEPLOYABLE (exit 0 through
+  the CLI), and in a candidate matrix a flat column out-ranked every real
+  configuration and was the one judged. Constant data is now detected directly
+  and treated as zero variance wherever the library divides by a std: the
+  Sharpe ratio, the PSR/DSR moments, the effective-trials column screen and the
+  walk-forward signal standardisation.
+- One non-finite prediction in a walk-forward training window discarded that
+  fold's entire out-of-sample block: the fold's mean became NaN, every test-bar
+  return became NaN, and those bars then dropped out as non-finite. A 20-bar
+  NaN warm-up halved a two-fold OOS series from 400 to 200 observations with
+  nothing in the verdict saying so. Folds now standardise on their finite
+  training predictions.
+- A `NaN` threshold switched its gate off instead of rejecting anything: every
+  gate is a comparison, and a comparison with `NaN` is false, so a record that
+  fails the Sharpe bar came back DEPLOYABLE under `Thresholds(min_sharpe=nan)`
+  (exit 0 with `--min-sharpe nan`). A `NaN` `periods_per_year` did the same
+  through a `NaN` annualised Sharpe. `Thresholds` now refuses `NaN`,
+  `evaluate()` and `annualized_sharpe()` refuse a non-finite
+  `periods_per_year`, and the CLI reports either as an input error (exit 2).
+- `evaluate()` accepted `n_trials=0` or a negative count, which the CLI
+  already refuses as `--trials 0`. Any explicit count switches a matrix to the
+  raw-count deflation, where a count below 1 is floored to one trial: the best
+  of 50 pure-noise columns, PROBABLY_OVERFIT by default, came back DEPLOYABLE
+  with `n_trials=0` and reported "Trials assumed: 0". It now raises
+  `ValueError`.
+- `max_drawdown()` started its running peak at the first period's closing
+  equity rather than at the starting capital of 1.0, so a loss in the opening
+  period was never measured: `max_drawdown([-0.5])` returned 0.0 (as `-0.0`),
+  two straight 10% losses returned 0.10 instead of 0.19, and a total loss in
+  the first period returned NaN. The starting equity now counts as the first
+  peak.
+- `probabilistic_sharpe_ratio()`, `deflated_sharpe_ratio()` and
+  `minimum_track_record_length()` returned `NaN` for a `NaN` `sr_benchmark`,
+  and `expected_max_sharpe_benchmark()` a `NaN` benchmark for a `NaN` `sigma`.
+  A `NaN` probability fails no gate (`dsr < 0.95` is false), so a caller
+  gating on it was waved through. They now raise `ValueError`, as does a
+  negative `sigma`, which produced a benchmark below zero. `evaluate()` never
+  passed either, so no verdict changes.
+- The README and `docs/TDD.md` still gave the suite as 166 tests; it is 196.
 
 ## [0.3.0] - 2026-07-31
 

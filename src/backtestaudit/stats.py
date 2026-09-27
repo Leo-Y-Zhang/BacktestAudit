@@ -80,6 +80,34 @@ def _clean(returns: npt.ArrayLike) -> FloatArray:
     return finite
 
 
+def _sample_std(r: FloatArray) -> float:
+    """Sample standard deviation (``ddof=1``), exactly ``0.0`` for constant data.
+
+    ``np.std`` of identical values is not reliably zero: the mean of repeated
+    copies of a value binary floating point cannot represent exactly (0.0004,
+    0.1) can land an ulp away from it, leaving a residue near 1e-19. Divided
+    into a mean, that residue reported a flat series as a Sharpe near 1e16,
+    and PSR/DSR as certainty of an edge. Constant data has zero variance, so
+    it is tested for directly rather than inferred from the rounded std.
+    """
+    if r.size < 2 or bool(np.all(r == r[0])):
+        return 0.0
+    return float(np.std(r, ddof=1))
+
+
+def _require_benchmark(sr_benchmark: float) -> float:
+    """``sr_benchmark`` as a float, refusing ``NaN``.
+
+    ``Phi(NaN)`` is ``NaN``, and a ``NaN`` probability fails no gate: every
+    ``prob < bar`` comparison with it is False. An infinite benchmark keeps its
+    meaning (a probability of 0 or 1), so only ``NaN`` is refused.
+    """
+    value = float(sr_benchmark)
+    if math.isnan(value):
+        raise ValueError("sr_benchmark must be a number, not NaN")
+    return value
+
+
 def _sharpe_moments(returns: npt.ArrayLike) -> tuple[int, float, float] | None:
     """Return ``(T, SR, sigma_SR)`` or ``None`` for degenerate input.
 
@@ -95,7 +123,7 @@ def _sharpe_moments(returns: npt.ArrayLike) -> tuple[int, float, float] | None:
     T = int(r.size)
     if T < _MIN_OBS:
         return None
-    sd = float(np.std(r, ddof=1))
+    sd = _sample_std(r)
     if sd <= 0.0:
         return None
     SR = float(np.mean(r) / sd)
@@ -121,7 +149,7 @@ def sharpe_ratio(returns: npt.ArrayLike) -> float:
     r = _clean(returns)
     if r.size < 2:
         return 0.0
-    sd = float(np.std(r, ddof=1))
+    sd = _sample_std(r)
     if sd <= 0.0:
         return 0.0
     return float(np.mean(r) / sd)
@@ -129,8 +157,9 @@ def sharpe_ratio(returns: npt.ArrayLike) -> float:
 
 def annualized_sharpe(returns: npt.ArrayLike, periods_per_year: int = 252) -> float:
     """Annualised Sharpe ratio = per-period Sharpe * ``sqrt(periods_per_year)``."""
-    if periods_per_year <= 0:
-        raise ValueError("periods_per_year must be > 0")
+    # `<= 0` alone is False for NaN, which would return a NaN Sharpe.
+    if not math.isfinite(periods_per_year) or periods_per_year <= 0:
+        raise ValueError("periods_per_year must be a finite number > 0")
     return float(sharpe_ratio(returns) * math.sqrt(periods_per_year))
 
 
@@ -138,15 +167,16 @@ def max_drawdown(returns: npt.ArrayLike) -> float:
     """Maximum drawdown of the compounded equity curve, as a positive fraction.
 
     ``0.0`` means no drawdown (or insufficient data). The returns are treated as
-    simple per-period returns and compounded as ``cumprod(1 + r)``.
+    simple per-period returns and compounded as ``cumprod(1 + r)`` from a
+    starting equity of ``1.0``, which counts as the first peak: a loss in the
+    opening period is a drawdown like any other.
     """
     r = _clean(returns)
     if r.size == 0:
         return 0.0
     equity = np.cumprod(1.0 + r)
-    peak = np.maximum.accumulate(equity)
-    drawdown = equity / peak - 1.0
-    return float(-np.min(drawdown))
+    peak = np.maximum(np.maximum.accumulate(equity), 1.0)
+    return float(np.max(1.0 - equity / peak))
 
 
 def hit_rate(returns: npt.ArrayLike) -> float:
@@ -240,7 +270,8 @@ def probabilistic_sharpe_ratio(returns: npt.ArrayLike, sr_benchmark: float = 0.0
     returns:
         Per-period (NOT annualised) returns. Non-finite entries are dropped.
     sr_benchmark:
-        Per-period Sharpe to test against (``SR*``). Defaults to ``0.0``.
+        Per-period Sharpe to test against (``SR*``). Defaults to ``0.0``;
+        ``NaN`` raises ``ValueError``.
 
     Returns
     -------
@@ -248,12 +279,18 @@ def probabilistic_sharpe_ratio(returns: npt.ArrayLike, sr_benchmark: float = 0.0
         Probability in ``[0, 1]``; ``0.0`` (fail-closed) on degenerate input
         (fewer than four observations, zero variance, or non-positive estimator
         variance from extreme skew/kurtosis).
+
+    Raises
+    ------
+    ValueError
+        If ``sr_benchmark`` is ``NaN``.
     """
+    benchmark = _require_benchmark(sr_benchmark)
     moments = _sharpe_moments(returns)
     if moments is None:
         return 0.0
     _T, SR, sigma = moments
-    return float(norm.cdf((SR - float(sr_benchmark)) / sigma))
+    return float(norm.cdf((SR - benchmark) / sigma))
 
 
 def expected_max_sharpe_benchmark(sigma: float, n_trials: int) -> float:
@@ -281,7 +318,13 @@ def expected_max_sharpe_benchmark(sigma: float, n_trials: int) -> float:
     & Lopez de Prado, 2014). Supplying a ``T x N`` candidate matrix to
     :func:`backtestaudit.evaluate.evaluate` lets the search be measured directly
     (via PBO) rather than only approximated here.
+
+    ``sigma`` may be ``inf`` (a degenerate record's standard error); a ``NaN``
+    or negative ``sigma`` raises ``ValueError``, since either would return a
+    benchmark that is meaningless or *below* zero, lowering the bar.
     """
+    if math.isnan(sigma) or sigma < 0.0:
+        raise ValueError(f"sigma must be a non-negative number (got {sigma})")
     n = max(int(n_trials), 1)
     if n <= 1:
         return 0.0
@@ -320,7 +363,14 @@ def deflated_sharpe_ratio(
     float
         Probability in ``[0, 1]``; ``0.0`` (fail-closed) on degenerate input.
         A common "significant" cutoff is ``DSR >= 0.95``.
+
+    Raises
+    ------
+    ValueError
+        If ``sr_benchmark`` is ``NaN``.
     """
+    if sr_benchmark is not None:
+        sr_benchmark = _require_benchmark(sr_benchmark)
     moments = _sharpe_moments(returns)
     if moments is None:
         return 0.0
@@ -366,7 +416,8 @@ def minimum_track_record_length(
     returns:
         Per-period (NOT annualised) returns. Non-finite entries are dropped.
     sr_benchmark:
-        Per-period Sharpe to test against (``SR*``). Defaults to ``0.0``.
+        Per-period Sharpe to test against (``SR*``). Defaults to ``0.0``;
+        ``NaN`` raises ``ValueError``.
     confidence:
         Required PSR level, strictly inside ``(0, 1)``; ``0.95`` mirrors the
         conventional 5% significance level.
@@ -382,11 +433,12 @@ def minimum_track_record_length(
     """
     if not 0.0 < confidence < 1.0:
         raise ValueError("confidence must be strictly between 0 and 1")
+    benchmark = _require_benchmark(sr_benchmark)
     moments = _sharpe_moments(returns)
     if moments is None:
         return float("inf")
     T, SR, sigma = moments
-    excess = SR - float(sr_benchmark)
+    excess = SR - benchmark
     if excess <= 0.0:
         return float("inf")
     variance_numerator = sigma * sigma * (T - 1)  # 1 - g3*SR + (g4 - 1)/4 * SR^2
@@ -514,7 +566,7 @@ def _prepared_trials(trials: npt.ArrayLike) -> tuple[FloatArray, list[int]] | No
     sub = sub[np.all(np.isfinite(sub), axis=1)]
     if sub.shape[0] < _MIN_CLUSTER_OBS:
         return None
-    keep = np.std(sub, axis=0, ddof=1) > 0.0
+    keep = np.any(sub != sub[0], axis=0)  # not constant (see _sample_std)
     if int(np.count_nonzero(keep)) < 2:
         return None
     if not bool(np.all(keep)):

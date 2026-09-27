@@ -32,14 +32,16 @@ the design rather than an appendix to it.
 
 | What breaks | Who notices | How it is detected | How it is undone |
 |---|---|---|---|
-| Fewer than 4 finite observations, or zero variance | the caller | `_sharpe_moments` returns `None`; PSR/DSR collapse to `0.0`, `sharpe_standard_error` to `inf`, MinTRL to `inf` | rejection with an explicit "record is too degenerate to measure" reason |
+| Fewer than 4 finite observations, or zero variance | the caller | `_sharpe_moments` returns `None`; PSR/DSR collapse to `0.0`, `sharpe_standard_error` to `inf`, MinTRL to `inf`. Zero variance means every value identical, tested directly by `_sample_std`: the rounded `np.std` of a repeated 0.0004 is ~1e-19, not 0 | rejection with an explicit "record is too degenerate to measure" reason |
 | Extreme skew/kurtosis drives the estimator variance non-positive or `NaN` | the caller | same guard — the check demands finite *and* positive, because a bare `<= 0` lets `NaN` through | same |
 | Candidate matrix unrankable (`N < 2`, `T < 4`, no usable partition) | the caller | PBO returns `degenerate_value`, which `evaluate` sets to `1.0` | PBO gate fails; verdict is `PROBABLY_OVERFIT` |
 | Matrix too short to measure a search (`< 100` complete rows, or rows ≤ columns) | the caller, via `effective_trials` being `None` | `cluster_trials` declines | falls back to the published raw-count deflation — never a *weaker* assumed search |
 | Configurations are near-duplicates, so the measured deflation is nearly nil | the caller, via the reasons | measured cross-trial dispersion below half the selected series' own Sharpe estimator noise | a caveat reason naming the trust model and telling the caller to pass `n_trials` |
 | Walk-forward CV yields no usable fold after purging | the caller | `_walk_forward_oos` returns `None` | verdict fails closed with a reason saying every figure shown is in-sample and is *not* evidence about held-out performance |
 | A supplied CSV column is a row counter, index, date or price level | the caller | `_not_returns_reason`: strictly monotone over ≥ 8 finite steps, or a magnitude above 10.0 | column dropped with a note to stderr; if nothing survives, exit 2 telling the user to name the column with `--column` |
-| `--trials 0` or a negative typo | the caller | `_positive_int` argparse type | usage error, exit 2. Previously it floored to 1 downstream, which both disabled deflation and silently switched off the matrix-measured benchmark |
+| `--trials 0` or a negative typo (`n_trials < 1` from the library) | the caller | `_positive_int` argparse type; `evaluate`'s argument check | usage error, exit 2; `ValueError` from `evaluate`. Previously it floored to 1 downstream, which both disabled deflation and silently switched off the matrix-measured benchmark |
+| A threshold or `periods_per_year` is `NaN` | the caller | `Thresholds.__post_init__` and `evaluate`'s argument check; every gate is a comparison, and a comparison with `NaN` is false, so a `NaN` bar would switch its gate off rather than reject anything | `ValueError`, exit 2 through the CLI |
+| A `NaN` `sr_benchmark` passed to PSR, DSR or MinTRL, or a `NaN` / negative `sigma` to `expected_max_sharpe_benchmark` | the library caller | `_require_benchmark` and the `sigma` check; `Phi(NaN)` is `NaN`, and a `NaN` probability fails no gate | `ValueError` |
 | Confidence bar set to 1.0 | the caller | `Phi^-1(1)` is infinite | MinTRL `inf` with a reason naming the bar, distinct from the "Sharpe below benchmark" case |
 | Report path unwritable | the caller | `OSError` around `write_report` | exit 2 after the verdict has already printed |
 
@@ -101,7 +103,7 @@ evaluate(
     predictions=None, targets=None,# optional paired signal + forward returns
     *,
     n_trials: int | None = None,   # None => inferred; explicit => raw-count deflation
-    periods_per_year: int = 252,   # must be > 0
+    periods_per_year: int = 252,   # finite and > 0
     thresholds: Thresholds | None = None,
     pbo_splits: int = 16,          # CSCV blocks, forced even and >= 2
     splitter: PurgedWalkForwardSplitter | None = None,
@@ -146,7 +148,7 @@ it with `degenerate_value=1.0` so an unrankable matrix is rejected.
 |---|---|
 | `0` | verdict is `DEPLOYABLE`; also `--about` and `--version` |
 | `1` | any other verdict — the CI-gate signal |
-| `2` | input could not be read or judged: missing/unreadable file, unparseable CSV, no numeric column, named column absent, no column that could be returns, `ValueError` from `evaluate`, or the report file could not be written; also argparse usage errors |
+| `2` | input could not be read or judged: missing/unreadable file, unparseable CSV, no numeric column, named column absent, no column that could be returns, a `NaN` threshold, `ValueError` from `evaluate`, or the report file could not be written; also argparse usage errors |
 
 Stdout carries the verdict, or the JSON. The report-written confirmation and the
 ignored-columns note go to **stderr**, so `--json --report` still emits parseable
@@ -188,19 +190,19 @@ version boundary. The 1-D path is unchanged. Reports stamped `v0.3.0` were
 produced against the measured benchmark and should not be compared directly with
 pre-0.3.0 ones.
 
-## What the 166 tests pin down
+## What the 196 tests pin down
 
-166 tests, `pytest -q`. CI runs `ruff check src tests`, `mypy src` (strict,
+196 tests, `pytest -q`. CI runs `ruff check src tests`, `mypy src` (strict,
 `python_version = 3.12`) and `pytest -q` on Python 3.13, with a 15-minute job
 timeout and a gitleaks job.
 
-**Anchored.** `test_stats.py` (672 lines) pins hand-computed values from the
+**Anchored.** `test_stats.py` (848 lines) pins hand-computed values from the
 source papers, so a refactor that changes a formula fails loudly rather than
 drifting.
 
 **Negative and fail-closed.** Degenerate records, near-constant returns,
 unrankable matrices, the `--trials 0` rejection, the not-returns column screen,
-and the "OOS requested but unavailable" refusal each have a test that would pass
+and the "OOS requested but unavailable" refusal each have a test that would fail
 if the guard were removed and the tool merely got quieter. That is the class of
 regression this suite exists to catch.
 

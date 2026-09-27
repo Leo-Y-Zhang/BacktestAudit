@@ -53,9 +53,36 @@ def test_sharpe_degenerate_is_zero() -> None:
     assert annualized_sharpe([]) == 0.0
 
 
+@pytest.mark.parametrize(("value", "n"), [(0.0004, 500), (0.1, 252), (0.01, 200)])
+def test_constant_series_is_zero_variance_not_rounding_noise(value: float, n: int) -> None:
+    """A constant series has zero variance whatever float rounding says.
+
+    None of these values is exactly representable in binary, so the mean of
+    ``n`` copies lands an ulp away from the value and ``np.std`` returns a
+    residue near 1e-19 instead of 0. Divided into the mean, that residue gave
+    a per-period Sharpe near 4e15; scipy's skew and kurtosis stayed finite on
+    the same input, so the moments guard passed it too and PSR and DSR both
+    returned 1.0 -- certainty of an edge on a record with no risk at all.
+    """
+    r = np.full(n, value)
+    assert sharpe_ratio(r) == 0.0
+    assert annualized_sharpe(r) == 0.0
+    assert probabilistic_sharpe_ratio(r, 0.0) == 0.0
+    assert deflated_sharpe_ratio(r, 10) == 0.0
+    assert math.isinf(sharpe_standard_error(r))
+    assert math.isinf(minimum_track_record_length(r, 0.0))
+
+
 def test_annualized_sharpe_rejects_bad_periods() -> None:
     with pytest.raises(ValueError):
         annualized_sharpe([0.01, 0.02, 0.03], 0)
+
+
+@pytest.mark.parametrize("periods_per_year", [float("nan"), float("inf")])
+def test_annualized_sharpe_rejects_non_finite_periods(periods_per_year: float) -> None:
+    # A NaN factor slipped past `periods_per_year <= 0` and returned a NaN Sharpe.
+    with pytest.raises(ValueError, match="periods_per_year"):
+        annualized_sharpe([0.01, 0.02, 0.03], periods_per_year)
 
 
 def test_max_drawdown_known() -> None:
@@ -65,6 +92,21 @@ def test_max_drawdown_known() -> None:
 
 def test_max_drawdown_monotonic_up_is_zero() -> None:
     assert max_drawdown([0.01, 0.02, 0.03]) == pytest.approx(0.0)
+
+
+def test_max_drawdown_counts_losses_from_the_starting_capital() -> None:
+    """The curve starts at 1.0 before the first return, and that is a peak too.
+
+    The running peak used to begin at the first period's closing equity, so a
+    loss in the opening period was never measured: a record that halved in
+    its only period reported no drawdown at all, and two straight 10% losses
+    (equity 0.9 then 0.81) reported 10% instead of 19%. A total loss in the
+    first period divided zero equity by a zero peak and returned NaN.
+    """
+    assert max_drawdown([-0.5]) == pytest.approx(0.5)
+    assert max_drawdown([-1.0, 0.1]) == pytest.approx(1.0)
+    assert max_drawdown([-0.10, -0.10]) == pytest.approx(0.19)
+    assert max_drawdown([-0.10, 0.20, -0.25]) == pytest.approx(1.0 - 0.81 / 1.08)
 
 
 def test_hit_rate() -> None:
@@ -110,6 +152,26 @@ def test_psr_hand_computed_value() -> None:
     # sr_var=(1+0.16*3.75)/3=0.5333333, sigma=0.7302967, PSR=Phi(2.651650)=0.996000
     r = np.array([0.01, 0.02, 0.03, 0.04])
     assert probabilistic_sharpe_ratio(r, 0.0) == pytest.approx(0.996000, abs=1e-4)
+
+
+def test_psr_hand_computed_value_with_skew() -> None:
+    # returns 0, 0, 0, 0.04: mean 0.01, sample std 0.02, SR = 0.5. Central
+    # moments m2 = 3e-4, m3 = 6e-6, m4 = 2.1e-7, so the biased skew is
+    # g3 = m3 / m2^1.5 = 2 / sqrt(3) and the non-excess kurtosis is
+    # g4 = m4 / m2^2 = 7 / 3. Then
+    #   sr_var = (1 - g3*SR + (g4 - 1)/4 * SR^2) / (T - 1)
+    #          = (1 - 1/sqrt(3) + 1/12) / 3 = 0.1686610,
+    # sigma = 0.4106836 and PSR(0) = Phi(0.5 / sigma) = Phi(1.2174823) = 0.888290.
+    # The test above has zero skew, so it cannot see the sign of the skew
+    # term, the biased-vs-unbiased skew choice, or a dropped skew term; each
+    # of those moves this value.
+    r = np.array([0.0, 0.0, 0.0, 0.04])
+    sr_var = (13.0 / 12.0 - 1.0 / math.sqrt(3.0)) / 3.0
+    assert sr_var == pytest.approx(0.1686610, abs=1e-7)  # anchor the arithmetic
+    assert sharpe_standard_error(r) == pytest.approx(math.sqrt(sr_var), rel=1e-9)
+    assert probabilistic_sharpe_ratio(r, 0.0) == pytest.approx(0.888290, abs=1e-6)
+    # Against a benchmark of 0.25: Phi(0.25 / sigma) = Phi(0.6087411) = 0.728652.
+    assert probabilistic_sharpe_ratio(r, 0.25) == pytest.approx(0.728652, abs=1e-6)
 
 
 def test_psr_decreasing_in_benchmark() -> None:
@@ -351,9 +413,52 @@ def test_dsr_explicit_benchmark_overrides_trials() -> None:
     assert a == pytest.approx(b)
 
 
+def test_dsr_hand_computed_value() -> None:
+    # Same record as the skewed PSR test: SR = 0.5, sigma = 0.4106836. For
+    # N = 10 trials the expected-maximum factor is
+    #   (1 - gamma) * Z^-1(0.9) + gamma * Z^-1(1 - 1/(10 e))
+    #   = 0.4227843 * 1.2815516 + 0.5772157 * 1.7887716 = 1.5745983,
+    # so SR* = sigma * 1.5745983 = 0.6466617 and
+    # DSR = Phi((SR - SR*) / sigma) = Phi(1.2174823 - 1.5745983) = Phi(-0.3571160)
+    #     = 0.360502. The observed Sharpe is below the benchmark, so the
+    # deflated probability falls under one half although PSR(0) is 0.888.
+    r = np.array([0.0, 0.0, 0.0, 0.04])
+    factor = (1.0 - EULER_MASCHERONI) * float(norm.ppf(0.9)) + EULER_MASCHERONI * float(
+        norm.ppf(1.0 - 1.0 / (10.0 * math.e))
+    )
+    assert factor == pytest.approx(1.5745983, abs=1e-7)
+    assert deflated_sharpe_ratio(r, n_trials=10) == pytest.approx(0.360502, abs=1e-6)
+
+
 def test_dsr_fail_closed() -> None:
     assert deflated_sharpe_ratio([0.01, 0.02, 0.03], 10) == 0.0
     assert deflated_sharpe_ratio([1.0, 1.0, 1.0, 1.0], 10) == 0.0
+
+
+def test_a_nan_benchmark_is_refused_not_returned_as_a_nan_probability() -> None:
+    # Phi(NaN) is NaN, and a NaN probability passes as well as fails nothing:
+    # `dsr < 0.95` is False for NaN, so a caller gating on it is waved through.
+    # A NaN benchmark or dispersion is an input error, refused like a NaN
+    # threshold. Infinite benchmarks keep their meaning (PSR 0 or 1).
+    r = np.array([0.0, 0.0, 0.0, 0.04])
+    nan = float("nan")
+    with pytest.raises(ValueError, match="sr_benchmark"):
+        probabilistic_sharpe_ratio(r, nan)
+    with pytest.raises(ValueError, match="sr_benchmark"):
+        deflated_sharpe_ratio(r, n_trials=10, sr_benchmark=nan)
+    with pytest.raises(ValueError, match="sr_benchmark"):
+        minimum_track_record_length(r, nan)
+    with pytest.raises(ValueError, match="sigma"):
+        expected_max_sharpe_benchmark(nan, 10)
+    with pytest.raises(ValueError, match="sigma"):
+        expected_max_sharpe_benchmark(-0.1, 10)  # a negative dispersion lowers the bar
+    # Refused even when the record itself is degenerate: the argument is wrong
+    # whatever the data.
+    with pytest.raises(ValueError, match="sr_benchmark"):
+        probabilistic_sharpe_ratio([0.01, 0.02], nan)
+    assert probabilistic_sharpe_ratio(r, float("inf")) == 0.0
+    assert probabilistic_sharpe_ratio(r, float("-inf")) == 1.0
+    assert expected_max_sharpe_benchmark(float("inf"), 1) == 0.0
 
 
 # ── PBO via CSCV ──────────────────────────────────────────────────────────────
@@ -441,6 +546,31 @@ def test_pbo_hand_computed_exact_median_tie_counts_as_overfit() -> None:
     assert probability_of_backtest_overfitting(M, n_splits=2) == pytest.approx(1.0)
 
 
+def test_pbo_hand_computed_one_partition_each_side() -> None:
+    """One CSCV partition lands in the worse OOS half and one in the better.
+
+    ``n_splits=2`` with ``N = 4`` columns, block sums (rows 0-1, rows 2-3):
+    ``A = [3, 4, 1, 2]`` and ``B = [4, 1, 0, 3]``.
+
+    Partition IS = A: best is column 1, whose OOS (B) sum 1 ranks 2 of 4
+    (only column 2 is lower), so ``w = 2/5``, ``logit = ln(2/3) < 0`` --
+    overfit. Partition IS = B: best is column 0, whose OOS (A) sum 3 ranks
+    3 of 4, so ``w = 3/5``, ``logit = ln(3/2) > 0`` -- not overfit.
+
+    PBO is the fraction with ``logit <= 0``: exactly 1/2. (Selecting the IS
+    *worst* column instead would give 1.0.)
+    """
+    M = np.array(
+        [
+            [1.0, 2.0, 0.0, 1.0],
+            [2.0, 2.0, 1.0, 1.0],
+            [2.0, 0.0, 0.0, 1.0],
+            [2.0, 1.0, 0.0, 2.0],
+        ]
+    )
+    assert probability_of_backtest_overfitting(M, n_splits=2) == pytest.approx(0.5)
+
+
 # ── effective trials via correlation clustering (Lopez de Prado & Lewis 2019) ─
 
 
@@ -509,6 +639,23 @@ def test_cluster_trials_non_finite_rows_are_not_evidence() -> None:
     noisy[100, 7] = np.inf
     noisy[200, 11] = -np.inf
     assert cluster_trials(noisy) == cluster_trials(perf)
+
+
+def test_cluster_trials_drops_a_column_constant_on_the_complete_rows() -> None:
+    """A column is only usable when it varies on the complete-case rows.
+
+    Column 3 varies overall (so its own Sharpe moments are valid) but is flat
+    on every row the other columns fill in, so correlations against it are
+    taken over rounding noise. The ``std > 0`` screen missed it because the
+    std of repeated 0.0004 is ~5e-20, not 0, and it was counted as a fourth
+    trial.
+    """
+    rng = np.random.default_rng(0)
+    perf = 0.01 * rng.standard_normal((300, 4))
+    perf[:, 3] = 0.0004
+    perf[:20, 3] = 0.01 * rng.standard_normal(20)  # varies only on these rows...
+    perf[:20, 0] = np.nan  # ...which are not complete cases
+    assert sorted(j for cluster in cluster_trials(perf) for j in cluster) == [0, 1, 2]
 
 
 def test_cross_trial_sharpe_std_hand_value() -> None:

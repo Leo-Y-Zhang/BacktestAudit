@@ -72,6 +72,94 @@ def test_predictions_targets_genuine_signal_oos_positive() -> None:
     assert verdict.oos_information_coefficient > 0.0
 
 
+def test_constant_returns_are_not_certified_deployable() -> None:
+    """A flat series has no measurable risk, so it cannot show a significant edge.
+
+    Measured before the fix: ``evaluate(np.full(500, 0.0004))`` returned
+    DEPLOYABLE with a deflated Sharpe of 1.000, an annualised Sharpe of 5.9e16
+    and "MinTRL 2 obs needed", because the std of repeated 0.0004 is a ~1e-19
+    rounding residue rather than 0. Through the CLI that is exit code 0 on a
+    CSV holding one repeated number.
+    """
+    verdict = evaluate(np.full(500, 0.0004))
+    assert not verdict.deployable
+    assert verdict.classification == "NOT_DEPLOYABLE"
+    assert verdict.sharpe == 0.0
+    assert verdict.deflated_sharpe == 0.0
+    assert math.isinf(verdict.min_track_record)
+    assert any("too degenerate to measure" in r for r in verdict.reasons), verdict.reasons
+
+
+def test_constant_column_is_not_selected_as_the_best_configuration() -> None:
+    """The judged column is the one with the highest Sharpe; a flat column has none.
+
+    Before the fix the flat column's rounding-residue Sharpe (~1e17 annualised)
+    beat every real configuration, so the verdict judged it instead of the
+    genuine strategy beside it.
+    """
+    rng = np.random.default_rng(42)
+    genuine = 0.0008 + 0.008 * rng.standard_normal(1500)
+    matrix = np.column_stack([genuine, np.full(1500, 0.0004)])
+    verdict = evaluate(matrix)
+    assert verdict.sharpe == pytest.approx(evaluate(genuine).sharpe)
+
+
+def test_constant_training_predictions_skip_the_fold() -> None:
+    """A signal flat across a fold's whole training window cannot be standardised.
+
+    ``_walk_forward_oos`` skips such a fold (``sd <= 0``), but for a flat value
+    binary floating point cannot represent the std was a ~1e-19 residue, the
+    fold was kept, and its test block was divided by that residue -- scaled by
+    ~1e16, swamping every other fold in the combined out-of-sample series.
+    """
+    from backtestaudit.crossval import PurgedWalkForwardSplitter
+
+    rng = np.random.default_rng(3)
+    n = 1000
+    targets = 0.01 * rng.standard_normal(n)
+    predictions = targets + 0.02 * rng.standard_normal(n)
+    predictions[:400] = 0.0004  # flat across the first fold's training window
+    splitter = PurgedWalkForwardSplitter(
+        train_size=400, valid_size=200, test_size=200, embargo_size=1, label_horizon=1
+    )
+    verdict = evaluate(targets, predictions=predictions, targets=targets, splitter=splitter)
+    # Two folds of 200 test bars each; only the second can be standardised.
+    assert verdict.n_periods == 200
+
+
+def test_a_blank_training_prediction_does_not_discard_the_fold() -> None:
+    """Non-finite predictions are not evidence, and must not erase the evidence beside them.
+
+    Each fold standardised the signal with ``np.mean``/``np.std`` over its
+    training predictions, so one NaN there made the mean NaN, turned every
+    test-bar return of that fold into NaN, and those finite test bars then
+    dropped out of the verdict as "non-finite". Measured before the fix: a
+    20-bar NaN warm-up (what a 20-bar rolling signal produces) silently threw
+    away the first fold's 200 out-of-sample bars, and a single blank cell in
+    the middle of the series threw away the second fold's.
+    """
+    from backtestaudit.crossval import PurgedWalkForwardSplitter
+
+    rng = np.random.default_rng(3)
+    n = 1000
+    targets = 0.01 * rng.standard_normal(n)
+    predictions = targets + 0.02 * rng.standard_normal(n)
+    splitter = PurgedWalkForwardSplitter(
+        train_size=400, valid_size=200, test_size=200, embargo_size=1, label_horizon=1
+    )
+
+    def oos_periods(preds: np.ndarray) -> int:
+        return evaluate(targets, predictions=preds, targets=targets, splitter=splitter).n_periods
+
+    assert oos_periods(predictions) == 400  # control: two folds of 200 test bars
+    warm_up = predictions.copy()
+    warm_up[:20] = np.nan  # inside the first fold's training window only
+    assert oos_periods(warm_up) == 400
+    blank = predictions.copy()
+    blank[450] = np.nan  # inside the second fold's training window only
+    assert oos_periods(blank) == 400
+
+
 def test_predictions_targets_noise_signal_oos_flat() -> None:
     rng = np.random.default_rng(78)
     predictions = rng.standard_normal(900)
@@ -110,6 +198,54 @@ def test_three_d_input_raises() -> None:
 def test_bad_periods_per_year_raises() -> None:
     with pytest.raises(ValueError):
         evaluate([0.01, 0.02, 0.03, 0.04], periods_per_year=0)
+
+
+@pytest.mark.parametrize("periods_per_year", [float("nan"), float("inf")])
+def test_non_finite_periods_per_year_raises(periods_per_year: float) -> None:
+    """``periods_per_year <= 0`` is False for NaN, so NaN got past the guard.
+
+    The annualised Sharpe then came out NaN, the Sharpe gate
+    (``sharpe <= min_sharpe``) could never fail, and this record -- rejected on
+    the Sharpe bar at 252 periods a year -- came back DEPLOYABLE. An infinite
+    factor turned every positive Sharpe into an infinite one.
+    """
+    rng = np.random.default_rng(0)
+    returns = 0.0003 + 0.01 * rng.standard_normal(20000)
+    assert not evaluate(returns).deployable  # control: fails the Sharpe bar only
+    with pytest.raises(ValueError, match="periods_per_year"):
+        evaluate(returns, periods_per_year=periods_per_year)
+
+
+@pytest.mark.parametrize("n_trials", [0, -5])
+def test_a_non_positive_trial_count_is_refused(n_trials: int) -> None:
+    """``n_trials`` below 1 is not a search size, and it switched deflation off.
+
+    The CLI already rejects ``--trials 0`` for this reason; the library took it
+    silently. Measured before the guard: the best of 50 pure-noise columns is
+    PROBABLY_OVERFIT on the measured default, but with ``n_trials=0`` (or -5)
+    the explicit count routed to the raw-count path, was floored to one trial,
+    and the same matrix came back DEPLOYABLE with "Trials assumed: 0" (or -5).
+    """
+    rng = np.random.default_rng(0)
+    candidates = 0.01 * rng.standard_normal((750, 50))
+    assert evaluate(candidates).classification == "PROBABLY_OVERFIT"  # control
+    with pytest.raises(ValueError, match="n_trials"):
+        evaluate(candidates, n_trials=n_trials)
+
+
+@pytest.mark.parametrize("field", ["min_deflated_sharpe", "min_sharpe", "max_pbo"])
+def test_a_nan_threshold_is_refused_not_read_as_no_bar(field: str) -> None:
+    """Each gate is a comparison against its threshold, and NaN compares False.
+
+    Measured before the guard: the record in the test above (annualised Sharpe
+    0.57, deflated Sharpe 1.000) is NOT_DEPLOYABLE on the default policy but
+    DEPLOYABLE with ``Thresholds(min_sharpe=nan)``, because ``sharpe <= nan``
+    never fails; a NaN ``max_pbo`` switched the PBO gate off the same way, and a
+    NaN ``min_deflated_sharpe`` raised from inside MinTRL with a message about
+    ``confidence``. A missing bar must be refused, not read as no bar.
+    """
+    with pytest.raises(ValueError, match=field):
+        Thresholds(**{field: float("nan")})
 
 
 # ── threshold boundaries: an equality case must not slip through as a pass ────
